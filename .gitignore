@@ -12,6 +12,7 @@ build/
 venv/
 env/
 ENV/
+.venv/
 
 # IDE
 .vscode/
@@ -26,12 +27,12 @@ ENV/
 
 # Terraform
 terraform/.terraform/
-src/terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.backup
 terraform/*.tfvars
 !terraform/*.tfvars.example
 terraform/.terraform.lock.hcl
+terraform/*-key.json
 
 # Data files
 downloaded_reports/
@@ -39,7 +40,7 @@ downloaded_earnings_calls/
 chunked_reports/
 chunked_earnings_calls/
 *.html
-*.txt
+test_output.txt
 
 # OS
 .DS_Store
@@ -53,8 +54,14 @@ Thumbs.db
 
 # Google Cloud
 service-account-key.json
-*.json
-!terraform/*.json
+*-key.json
 
 # Arize
 .arize/
+
+# MCP Servers (bundled in finance_agent)
+finance_agent/mcp_servers/*/.venv/
+finance_agent/mcp_servers/*/__pycache__/
+
+# Sessions database (local development)
+sessions.db

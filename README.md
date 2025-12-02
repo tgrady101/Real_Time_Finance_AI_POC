@@ -4,11 +4,15 @@ S&P 500-focused AI chatbot with multi-agent architecture for comprehensive finan
 
 ## Features
 
-- **7 Specialized Agents**: Market Data, Fundamentals, Economic, News Sentiment, Portfolio, Data Store (RAG), Root Orchestrator
-- **Real-Time Data**: Ninja API (stocks, crypto, forex), FRED (economic indicators), NewsAPI
-- **Deep Analysis**: Vertex AI Data Store with earnings call transcripts and SEC 10-K/10-Q filings
-- **S&P 500 Scope**: 500 companies with guaranteed comprehensive data availability
-- **Observability**: Arize AI for LLM tracing and agent monitoring
+- **Multi-Agent Architecture**: Root Orchestrator with 4 specialized sub-agents (Market Data, Economic, Headlines, Portfolio)
+- **Dynamic Model Routing**: Automatic selection between gemini-2.5-flash (simple) and gemini-3-pro-preview (complex)
+- **Real-Time Data**: Yahoo Finance MCP Server for stock prices and fundamentals
+- **Economic Data**: FRED API integration for GDP, inflation, unemployment, interest rates
+- **News Headlines**: Google Search integration for real-time company news
+- **Portfolio Analysis**: Risk metrics, allocation breakdown, rebalancing recommendations
+- **S&P 500 Scope**: 500 companies with ticker validation and fuzzy matching
+- **Persistent Memory**: PostgreSQL-backed cross-session recall with `load_memory` tool
+- **Observability**: Arize AX for LLM tracing + 19-evaluator test suite (96.9% pass rate)
 
 ## Quick Start
 
@@ -16,8 +20,8 @@ S&P 500-focused AI chatbot with multi-agent architecture for comprehensive finan
 
 - Python 3.10+
 - Google Cloud Project with billing enabled
-- Terraform installed
-- API Keys: Ninja API, FRED, NewsAPI (optional), Arize
+- Terraform installed (for Cloud SQL memory storage)
+- Optional: Arize API key for observability
 
 ### 2. Setup Infrastructure
 
@@ -39,62 +43,87 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env with your settings:
+# - GOOGLE_CLOUD_PROJECT (required)
+# - ARIZE_API_KEY, ARIZE_SPACE_ID (optional)
 ```
 
-### 5. Load Data (Optional but Recommended)
+### 5. Run the Chatbot
 
 ```bash
-# Load S&P 500 earnings calls and SEC filings
-python src/workflow_1/ingestion/earnings_call_ingestion.py
-python src/workflow_1/ingestion/sec_filings_ingestion.py
-```
-
-### 6. Run the Chatbot
-
-```bash
-python src/workflow_1/main.py
+cd finance_agent
+python main.py
+# API at http://localhost:8080
+# Docs at http://localhost:8080/docs
+# Chat UI at http://localhost:8080/chat-ui
 ```
 
 ## Architecture
 
 ```
-Root Orchestrator
-├── Market Data Agent (Ninja API)
-├── Fundamentals Agent (Ninja API)
-├── Economic Agent (FRED API)
-├── News Sentiment Agent (NewsAPI + Gemini)
-├── Portfolio Agent (Analysis & Recommendations)
-└── Data Store Agent (Vertex AI RAG)
+Root Orchestrator (dynamic model routing)
+├── Market Data Agent (Yahoo Finance MCP) - Stock prices, financials, options
+├── Economic Agent (FRED API) - GDP, inflation, unemployment, rates
+├── Headlines Agent (Google Search) - News, earnings, sentiment
+├── Portfolio Agent (yfinance + numpy) - Risk, allocation, rebalancing
+├── S&P 500 Validation Tools
+└── Memory Tools (load_memory for cross-session recall)
 ```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for comprehensive architecture documentation.
 
 ## Example Queries
 
-- "What's Apple's current stock price and P/E ratio?"
-- "Show me the latest inflation and unemployment rates"
-- "What did Tesla's CEO say about production in the last earnings call?"
-- "Compare AAPL and MSFT fundamentals and suggest which is better for growth"
-- "Analyze my portfolio: 60% SPY, 30% QQQ, 10% BND"
+**Market Data:**
+- "What's Apple's current stock price?"
+- "Compare AAPL and MSFT stock performance"
+- "What is the P/E ratio for Tesla?"
+
+**Economic Data:**
+- "What's the current GDP growth rate?"
+- "What's the inflation rate right now?"
+- "Show me unemployment data"
+
+**News Headlines:**
+- "Get Tesla news"
+- "What are analysts saying about Apple?"
+
+**Portfolio Analysis:**
+- "Analyze my portfolio: 100 AAPL, 50 MSFT, 200 GOOGL"
+- "What's the risk profile of my holdings?"
+
+**Memory Recall:**
+- "What questions have I asked in the past?"
 
 ## Project Structure
 
 ```
 Real_Time_Finance_AI_POC/
-├── terraform/              # Infrastructure as code
-├── src/
-│   └── workflow_1/        # Agent application code
-│       ├── agents/        # 7 specialized agents
-│       ├── api_clients/   # API wrappers
-│       ├── ingestion/     # Data loading scripts
-│       ├── observability/ # Arize integration
-│       └── utils/         # S&P 500 validation
-├── requirements.txt
-└── .env
+├── finance_agent/          # Primary application code
+│   ├── main.py             # FastAPI server (port 8080)
+│   ├── Dockerfile          # Cloud Run container
+│   ├── mcp_servers/        # Bundled Yahoo Finance MCP
+│   └── workflow_1/
+│       ├── agents/         # Root + Market Data agents
+│       ├── api_clients/    # FRED, NewsAPI (future use)
+│       ├── mcp_clients/    # Yahoo Finance MCP client
+│       ├── memory/         # PostgresMemoryService
+│       ├── arize_observability/
+│       └── utils/          # S&P 500 validation, model routing
+├── terraform/              # Cloud SQL, IAM, storage
+├── docs/                   # Architecture documentation
+└── tests/                  # Test suite
 ```
 
-## Development
+## Deployment
 
-See [implementation_plan.md](.gemini/antigravity/brain/2fc45e52-b636-4cc2-a5c0-49cd8b239915/implementation_plan.md) for detailed architecture and development guide.
+```bash
+# Deploy to Cloud Run
+python deploy_cloud_run.py --deploy
+
+# View logs
+python deploy_cloud_run.py --logs
+```
 
 ## License
 
