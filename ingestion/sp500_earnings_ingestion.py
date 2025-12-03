@@ -570,8 +570,8 @@ def main():
     
     print(f"\n   Total chunks: {len(all_chunks)}")
     
-    # Save chunks to file
-    chunk_file = save_chunks_to_file(all_chunks)
+    # Save chunks to file (function prints confirmation)
+    _ = save_chunks_to_file(all_chunks)
     
     # Import to Vertex AI
     if not args.skip_import:

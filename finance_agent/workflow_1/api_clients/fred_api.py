@@ -9,11 +9,10 @@ Provides access to Federal Reserve Economic Data (FRED) for:
 
 import os
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 import requests
-import time
 from ..arize_observability import instrument
 
 # Load environment variables from project root

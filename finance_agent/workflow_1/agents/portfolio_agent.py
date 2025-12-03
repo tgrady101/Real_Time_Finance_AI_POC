@@ -12,10 +12,8 @@ The agent uses Yahoo Finance MCP for real-time price data and calculates
 portfolio metrics based on user-provided holdings.
 """
 
-import asyncio
 from pathlib import Path
-from typing import Optional, Dict, List, Any
-from datetime import datetime, timedelta
+from typing import Optional, Dict, List
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -638,8 +636,8 @@ def _parse_holdings(holdings_str: str) -> Dict[str, float]:
                     price = stock.info.get('currentPrice') or stock.info.get('regularMarketPrice', 100)
                     shares = amount / price
                     holdings[ticker] = holdings.get(ticker, 0) + shares
-                except:
-                    pass
+                except Exception:
+                    pass  # Skip tickers that fail to fetch
     
     return holdings
 
