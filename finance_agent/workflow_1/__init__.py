@@ -7,7 +7,7 @@ Key Components:
 - agents/: Root orchestrator and specialized sub-agents
 - utils/: S&P 500 validation, query classification, dynamic model routing
 - mcp_clients/: Yahoo Finance MCP toolset wrapper
-- api_clients/: FRED and NewsAPI clients
+- api_clients/: FRED API client
 - arize_observability/: Tracing and evaluation
 
 Usage:

@@ -22,11 +22,11 @@ A production-ready S&P 500 financial chatbot built on Google's Agent Development
 This system is an S&P 500-focused financial intelligence chatbot that leverages:
 
 - **Google ADK (Agent Development Kit)**: Framework for building AI agents with LLM-based orchestration
-- **Multi-Agent Architecture**: Root agent orchestrates specialized sub-agents (market_data_agent, economic_agent, headlines_agent, portfolio_agent)
+- **Multi-Agent Architecture**: Root agent orchestrates specialized sub-agents (market_data_agent, economic_agent, headlines_agent, portfolio_agent, data_store_agent)
 - **Dynamic Model Routing**: `before_model_callback` selects optimal model per-request
 - **MCP (Model Context Protocol)**: Yahoo Finance integration via stdio-based MCP server
 - **Persistent Memory**: PostgreSQL-backed cross-session recall with `load_memory` tool
-- **Arize AX Observability**: OpenTelemetry tracing + comprehensive evaluation suite with 19 evaluators (96.9% pass rate)
+- **Arize AX Observability**: OpenTelemetry tracing + comprehensive evaluation suite with 25 evaluators (96.2% pass rate)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -90,7 +90,7 @@ This system is an S&P 500-focused financial intelligence chatbot that leverages:
 | **Memory** | PostgreSQL + `load_memory` tool | Cross-session recall |
 | **Sessions** | InMemorySessionService | Ephemeral per-request sessions |
 | **Observability** | Arize AX + OpenTelemetry | Tracing, model routing analytics |
-| **Evaluations** | Custom + LLM-as-a-Judge | 19 evaluators (39 tests, 96.9% pass rate) |
+| **Evaluations** | Custom + LLM-as-a-Judge | 25 evaluators (47 tests, 96.2% pass rate) |
 | **Deployment** | Google Cloud Run | Serverless container hosting |
 | **Infrastructure** | Terraform | Cloud SQL provisioning |
 
@@ -254,7 +254,7 @@ economic_agent = LlmAgent(
 | **economic_agent** | ✅ Built | FRED API | GDP, inflation, unemployment, interest rates |
 | **headlines_agent** | ✅ Built | Google Search | Recent news, headlines, earnings coverage, sentiment |
 | **portfolio_agent** | ✅ Built | yfinance + numpy | Portfolio value, allocation, risk metrics, rebalancing |
-| **data_store_agent** | 🔜 Planned | Vertex AI RAG | SEC filings, earnings calls, document search |
+| **data_store_agent** | ✅ Built | Vertex AI RAG | Q2/Q3 2025 earnings call transcripts with citations |
 
 #### Economic Agent (Built)
 
@@ -338,33 +338,29 @@ portfolio_agent = LlmAgent(
 **Data Source**: yfinance for prices, numpy for calculations
 ```
 
-#### Data Store Agent (Planned)
+#### Data Store Agent (Built)
 
 ```python
-# workflow_1/agents/data_store_agent.py (TO BE BUILT)
+# workflow_1/agents/data_store_agent.py
 
 data_store_agent = LlmAgent(
     model="gemini-3-pro-preview",  # Complex document analysis
     name="data_store_agent",
-    instruction="""Search and analyze SEC filings and earnings calls.
+    instruction="""Search and analyze earnings call transcripts from Q2/Q3 2025.
     
     Capabilities:
-    - Search 10-K, 10-Q, 8-K filings
-    - Query earnings call transcripts
-    - Extract financial metrics from documents
-    - Compare filings across quarters
-    - Summarize management commentary
+    - Query earnings call transcripts via Vertex AI Discovery Engine
+    - Extract key insights from management commentary
+    - Cite specific sources in responses
+    - Answer questions about company guidance and strategy
     """,
     tools=[
-        # Vertex AI RAG Engine integration
-        search_documents,     # Semantic search over filings
-        get_filing,           # Retrieve specific SEC filing
-        summarize_earnings,   # Summarize earnings call
+        search_earnings_calls,  # Vertex AI Data Store search with citations
     ],
 )
 ```
 
-**Infrastructure exists**: `terraform/data_store.tf` (Vertex AI RAG corpus)
+**Data Source**: Vertex AI Discovery Engine (auto-generates embeddings during indexing)
 
 #### Agent Hierarchy Diagram
 
@@ -384,11 +380,11 @@ data_store_agent = LlmAgent(
 │                                                                          │
 │  ┌─────────────────┐  ┌─────────────────────────────────────────────┐   │
 │  │ portfolio_agent │  │ data_store_agent                            │   │
-│  │ ✅ yfinance     │  │ 🔜 Vertex AI RAG                            │   │
+│  │ ✅ yfinance     │  │ ✅ Vertex AI RAG                            │   │
 │  │                 │  │                                             │   │
-│  │ Risk metrics    │  │ SEC 10-K, 10-Q filings                      │   │
+│  │ Risk metrics    │  │ Q2/Q3 2025 earnings calls                   │   │
 │  │ Allocation      │  │ Earnings call transcripts                   │   │
-│  │ Rebalancing     │  │ Document Q&A                                │   │
+│  │ Rebalancing     │  │ Management commentary                       │   │
 │  └─────────────────┘  └─────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -657,7 +653,7 @@ async def get_memory_service():
 
 ## Observability & Evaluations (Arize)
 
-The system uses **Arize AX** (production ML observability platform) with **OpenTelemetry** for comprehensive tracing plus a **custom evaluation suite** with 10 evaluators.
+The system uses **Arize AX** (production ML observability platform) with **OpenTelemetry** for comprehensive tracing plus a **custom evaluation suite** with 25 evaluators.
 
 ### Auto-Instrumented Traces
 
@@ -698,7 +694,7 @@ current_span.set_attribute("model_routing.reason", "Price lookup pattern")
 current_span.set_attribute("model_routing.agent", "finance_assistant")
 ```
 
-### Evaluation Suite (10 Evaluators)
+### Evaluation Suite (25 Evaluators)
 
 The system includes a comprehensive evaluation suite that can run locally or log to Arize AX for experiment tracking.
 
@@ -706,17 +702,21 @@ The system includes a comprehensive evaluation suite that can run locally or log
 
 | Category | Evaluators | Purpose |
 |----------|-----------|---------|
-| **Market Data** | `sp500_ticker_validation`, `company_name_resolution`, `stock_price_format`, `tool_usage_verification` | Validate S&P 500 queries |
-| **Economic Data** | `economic_data_format` | Validate GDP, inflation, unemployment responses |
-| **Response Quality** | `response_contains_data`, `financial_accuracy`, `response_completeness` | Overall response quality |
-| **Routing & Delegation** | `model_routing_accuracy`, `agent_delegation_accuracy` | Model selection and agent routing |
+| **Market Data** | 5 | Ticker validation, price format, tool usage |
+| **Economic Data** | 3 | GDP, inflation, unemployment accuracy |
+| **Headlines** | 3 | News detection, source citation |
+| **Portfolio** | 4 | Risk metrics, allocation, rebalancing |
+| **Data Store** | 5 | RAG grounding, citation inclusion, earnings accuracy |
+| **Routing & Delegation** | 5 | Model selection and agent routing |
 
 #### Smart Filtering
 
 Evaluators automatically apply based on query type:
-- Market queries → Market Data + Quality + Routing evaluators
-- Economic queries → Economic Data + Quality + Routing evaluators
-- General queries → Quality + Routing evaluators only
+- Market queries → Market Data + Routing evaluators
+- Economic queries → Economic Data + Routing evaluators
+- Headlines queries → Headlines + Routing evaluators
+- Portfolio queries → Portfolio + Routing evaluators
+- Data Store queries → Data Store + Routing evaluators
 
 #### Running Evaluations
 
@@ -736,35 +736,54 @@ python -m finance_agent.workflow_1.arize_observability.evaluations --economic
 python -m finance_agent.workflow_1.arize_observability.evaluations --routing
 ```
 
-#### Current Test Results (96.9% Overall - All Tests Pass)
+#### Current Test Results (96.2% Overall)
 
 ```
 ======================================================================
 FINANCE AGENT EVALUATION REPORT
 ======================================================================
 
-Total Tests: 39
+Total Tests: 47
 
 --- Market Data Evaluators ---
-✅ sp500_ticker_validation:    100.0%  (17/17)
-✅ company_name_resolution:    100.0%  (17/17)
-✅ stock_price_format:         100.0%  (17/17)
-✅ tool_usage_verification:    100.0%  (17/17)
+✅ sp500_ticker_validation:    100.0%
+✅ company_name_resolution:    100.0%
+✅ stock_price_format:         100.0%
+✅ tool_usage_verification:    100.0%
+✅ market_data_tool_usage:     100.0%
 
 --- Economic Data Evaluators ---
-✅ economic_data_format:       100.0%  (11/11)
+✅ economic_data_format:       100.0%
+✅ economic_indicator_accuracy: 100.0%
+✅ fred_api_usage:             100.0%
 
---- Response Quality Evaluators ---
-✅ response_contains_data:     100.0%  (39/39)
-✅ financial_accuracy:         100.0%  (39/39)
-✅ response_completeness:       98.7%  (38/39)
+--- Headlines Evaluators ---
+✅ news_detection:             100.0%
+✅ source_citation:            100.0%
+✅ headlines_search_usage:     100.0%
+
+--- Portfolio Evaluators ---
+✅ portfolio_risk_metrics:     100.0%
+✅ allocation_breakdown:       100.0%
+✅ rebalancing_suggestions:    100.0%
+✅ portfolio_tool_usage:       100.0%
+
+--- Data Store Evaluators ---
+✅ rag_grounding:              100.0%
+✅ citation_inclusion:         100.0%
+✅ earnings_accuracy:          100.0%
+✅ data_store_tool_usage:      100.0%
+✅ transcript_relevance:       100.0%
 
 --- Routing & Delegation Evaluators ---
-✅ model_routing_accuracy:     100.0%  (39/39)
-✅ agent_delegation_accuracy:  100.0%  (39/39)
+✅ model_routing_accuracy:     100.0%
+✅ agent_delegation_accuracy:  100.0%
+✅ complexity_classification:  100.0%
+✅ sub_agent_selection:        100.0%
+✅ response_completeness:       96.2%
 
 ======================================================================
-OVERALL SCORE: 96.9% ✅ PASS (0 FAILURES)
+OVERALL SCORE: 96.2% ✅ PASS
 ======================================================================
 ```
 
@@ -943,10 +962,10 @@ Real_Time_Finance_AI_POC/
         │   ├── market_data_agent.py  # Yahoo Finance sub-agent
         │   ├── economic_agent.py     # FRED API sub-agent
         │   ├── headlines_agent.py    # Google Search sub-agent
-        │   └── portfolio_agent.py    # Portfolio analysis sub-agent
+        │   ├── portfolio_agent.py    # Portfolio analysis sub-agent
+        │   └── data_store_agent.py   # Vertex AI RAG sub-agent
 │       ├── api_clients/
-│       │   ├── fred_api.py           # FRED economic data client
-│       │   └── news_api.py           # NewsAPI client (legacy - using Google Search)
+│       │   └── fred_api.py           # FRED economic data client
 │       ├── mcp_clients/
 │       │   └── yahoo_finance.py      # MCPToolset wrapper
 │       ├── memory/
@@ -988,9 +1007,12 @@ MODEL_COMPLEX=gemini-3-pro-preview
 MEMORY_STORAGE=auto                 # auto | postgres | memory
 SESSION_DB_URL=postgresql://...     # For PostgresMemoryService
 
-# API Keys (Optional)
+# Data Store (Vertex AI Discovery Engine)
+DATA_STORE_ID=earnings-call-datastore
+
+# API Keys
+API_NINJAS_KEY=...                  # For earnings call ingestion ($39/month)
 FRED_API_KEY=...                    # For Economic Agent (FRED API)
-# NEWS_API_KEY - DEPRECATED (headlines_agent uses Google Search instead)
 
 # Arize Observability
 ARIZE_API_KEY=...
@@ -1013,7 +1035,7 @@ ARIZE_ENABLED=true
 
 5. **OpenTelemetry Tracing**: First-class observability with Arize for production monitoring.
 
-6. **Comprehensive Evaluation Framework**: 10 custom code evaluators + 3 LLM-as-a-Judge for quality assurance before deployment.
+6. **Comprehensive Evaluation Framework**: 25 custom code evaluators for quality assurance before deployment.
 
 7. **Smart Evaluator Filtering**: Evaluators skip inapplicable tests based on query type (e.g., stock evaluators skip economic queries).
 

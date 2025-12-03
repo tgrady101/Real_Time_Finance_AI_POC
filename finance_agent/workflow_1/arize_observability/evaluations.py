@@ -1413,6 +1413,7 @@ def agent_delegation_accuracy(output: str, dataset_row: Dict[str, Any]) -> Evalu
     - Economic queries went to economic_agent
     - Headlines/news queries went to headlines_agent
     - Portfolio queries went to portfolio_agent
+    - Data store queries (earnings calls) went to data_store_agent
     - General queries were handled by root agent
     
     Infers delegation from response content patterns.
@@ -1514,12 +1515,31 @@ def agent_delegation_accuracy(output: str, dataset_row: Dict[str, Any]) -> Evalu
     ]
     headlines_score = sum(1 for s in headlines_signals if s) / len(headlines_signals)
     
+    # Data store agent signals - earnings call RAG
+    data_store_signals = [
+        any(term in output_lower for term in ["earnings call", "earnings transcript", "quarterly call", "q1", "q2", "q3", "q4"]),
+        any(term in output_lower for term in ["ceo", "cfo", "chief executive", "chief financial"]),
+        any(term in output_lower for term in ["said", "stated", "noted", "emphasized", "mentioned", "discussed", "outlined"]),
+        # Citation patterns
+        bool(re.search(r'\[source:', output_lower)),
+        bool(re.search(r'citation', output_lower)),
+        bool(re.search(r'📎', output)),  # Citation emoji
+        # Quote patterns from earnings calls
+        bool(re.search(r'"[^"]{20,}"', output)),  # Long quoted text
+        # Earnings/guidance language
+        any(term in output_lower for term in ["guidance", "revenue growth", "margin", "backlog", "strategic priorities"]),
+        # Query context - if query asks about earnings call
+        any(term in query for term in ["earnings call", "earnings", "transcript", "ceo said", "cfo said"]),
+    ]
+    data_store_score = sum(1 for s in data_store_signals if s) / len(data_store_signals)
+    
     # Determine detected agent with lower thresholds
     scores = {
         "market_data_agent": market_score,
         "economic_agent": economic_score,
         "headlines_agent": headlines_score,
         "portfolio_agent": portfolio_score,
+        "data_store_agent": data_store_score,
         "root_agent": root_score,
     }
     
@@ -1549,6 +1569,8 @@ def agent_delegation_accuracy(output: str, dataset_row: Dict[str, Any]) -> Evalu
                 detected_agent = "headlines_agent"
             elif query_type == "portfolio" and "portfolio_agent" in tied_agents:
                 detected_agent = "portfolio_agent"
+            elif query_type == "data_store" and "data_store_agent" in tied_agents:
+                detected_agent = "data_store_agent"
             elif query_type == "general":
                 detected_agent = "root_agent"
     
@@ -1581,7 +1603,7 @@ def agent_delegation_accuracy(output: str, dataset_row: Dict[str, Any]) -> Evalu
         return EvaluationResult(
             score=0.7,
             label="detected_agent",
-            explanation=f"Detected delegation to: {detected_agent} (market: {market_score:.1%}, economic: {economic_score:.1%}, headlines: {headlines_score:.1%}, portfolio: {portfolio_score:.1%})"
+            explanation=f"Detected delegation to: {detected_agent} (market: {market_score:.1%}, economic: {economic_score:.1%}, headlines: {headlines_score:.1%}, portfolio: {portfolio_score:.1%}, data_store: {data_store_score:.1%})"
         )
 
 
@@ -2138,6 +2160,487 @@ def headlines_relevance(output: str, dataset_row: Dict[str, Any]) -> EvaluationR
     if expected_ticker:
         explanation += f" (ticker: {'found' if expected_ticker.lower() in output_lower else 'not found'})"
     
+    return EvaluationResult(score=score, label=label, explanation=explanation)
+
+
+# =============================================================================
+# DATA STORE AGENT EVALUATORS (Earnings Call RAG)
+# =============================================================================
+
+def earnings_call_citation_format(output: str, dataset_row: Dict[str, Any]) -> EvaluationResult:
+    """
+    Evaluate if earnings call responses include proper citations.
+    
+    Expects citations in format: [Source: TICKER QX YEAR Earnings Call - Speaker]
+    
+    This is CRITICAL for RAG responses to be trustworthy.
+    """
+    output_lower = output.lower()
+    query_type = dataset_row.get("query_type", "")
+    
+    # Only apply to data_store/earnings queries
+    if query_type != "data_store":
+        return EvaluationResult(
+            score=1.0,
+            label="not_applicable",
+            explanation="Not an earnings call query"
+        )
+    
+    score = 0.0
+    found_elements = []
+    
+    # Check 1: Has citation markers
+    citation_patterns = [
+        r'\[source:.*?\]',  # [Source: ...]
+        r'\*\*\[source:.*?\]\*\*',  # **[Source: ...]**
+        r'📎\s*citation',  # 📎 Citation:
+        r'\(source:.*?\)',  # (Source: ...)
+    ]
+    has_citation_marker = any(re.search(p, output_lower) for p in citation_patterns)
+    if has_citation_marker:
+        score += 0.35
+        found_elements.append("citation_marker")
+    
+    # Check 2: Has ticker in citation context
+    ticker_in_context = bool(re.search(r'\b[A-Z]{2,5}\s+Q[1-4]\s+\d{4}', output))
+    if ticker_in_context:
+        score += 0.25
+        found_elements.append("ticker_quarter_year")
+    
+    # Check 3: Has speaker attribution
+    speaker_patterns = [
+        r'(ceo|cfo|chief|president|vice president|analyst)',
+        r'(tim cook|satya nadella|jensen huang|sundar pichai)',  # Known executives
+        r'earnings call\s*-\s*\w+',
+    ]
+    has_speaker = any(re.search(p, output_lower) for p in speaker_patterns)
+    if has_speaker:
+        score += 0.25
+        found_elements.append("speaker_attribution")
+    
+    # Check 4: Has quarter reference
+    quarter_patterns = [r'q[1-4]\s*\d{4}', r'q[1-4]\s+20\d{2}', r'quarter']
+    has_quarter = any(re.search(p, output_lower) for p in quarter_patterns)
+    if has_quarter:
+        score += 0.15
+        found_elements.append("quarter_reference")
+    
+    if score >= 0.75:
+        label = "well_cited"
+    elif score >= 0.5:
+        label = "partially_cited"
+    elif score >= 0.25:
+        label = "minimal_citation"
+    else:
+        label = "no_citations"
+    
+    explanation = f"Citation score: {score:.2f}. Found: {', '.join(found_elements) if found_elements else 'no citation elements'}"
+    return EvaluationResult(score=score, label=label, explanation=explanation)
+
+
+def earnings_call_content_relevance(output: str, dataset_row: Dict[str, Any]) -> EvaluationResult:
+    """
+    Evaluate if earnings call response content is relevant to the query.
+    
+    Checks that the response addresses the specific topic asked about
+    (e.g., AI strategy, challenges, guidance, etc.)
+    """
+    output_lower = output.lower()
+    query_type = dataset_row.get("query_type", "")
+    query = dataset_row.get("input", "").lower()
+    expected_ticker = dataset_row.get("expected_ticker", "").upper()
+    
+    # Only apply to data_store queries
+    if query_type != "data_store":
+        return EvaluationResult(
+            score=1.0,
+            label="not_applicable",
+            explanation="Not an earnings call query"
+        )
+    
+    score = 0.0
+    relevance_signals = []
+    
+    # Check 1: Ticker relevance
+    if expected_ticker and expected_ticker.lower() in output_lower:
+        score += 0.3
+        relevance_signals.append("ticker_mentioned")
+    
+    # Check 2: Topic relevance - extract topic keywords from query
+    topic_keywords = {
+        "ai": ["ai", "artificial intelligence", "machine learning", "neural", "gpt", "llm"],
+        "challenges": ["challenge", "headwind", "obstacle", "difficulty", "concern", "risk"],
+        "guidance": ["guidance", "outlook", "forecast", "expect", "project", "anticipate"],
+        "strategy": ["strategy", "strategic", "initiative", "priority", "focus"],
+        "competition": ["compet", "rival", "market share", "position"],
+        "growth": ["growth", "expand", "revenue", "increase"],
+        "margins": ["margin", "profitability", "cost", "efficiency"],
+        "supply chain": ["supply chain", "inventory", "logistics", "supplier"],
+    }
+    
+    # Find which topics are in the query
+    query_topics = []
+    for topic, keywords in topic_keywords.items():
+        if any(kw in query for kw in keywords):
+            query_topics.append(topic)
+    
+    # Check if those topics are addressed in output
+    topics_addressed = 0
+    for topic in query_topics:
+        if any(kw in output_lower for kw in topic_keywords[topic]):
+            topics_addressed += 1
+    
+    if query_topics:
+        topic_score = min(0.4, (topics_addressed / len(query_topics)) * 0.4)
+        score += topic_score
+        if topics_addressed > 0:
+            relevance_signals.append(f"topics_addressed:{topics_addressed}/{len(query_topics)}")
+    else:
+        # General query - just check for substantive content
+        if len(output) > 100:
+            score += 0.3
+            relevance_signals.append("substantive_content")
+    
+    # Check 3: Executive commentary signals (shows it's from earnings call)
+    exec_signals = [
+        "said", "stated", "noted", "mentioned", "emphasized",
+        "according to", "commented", "highlighted", "discussed",
+        "ceo", "cfo", "management", "executive"
+    ]
+    exec_count = sum(1 for sig in exec_signals if sig in output_lower)
+    if exec_count >= 2:
+        score += 0.3
+        relevance_signals.append("exec_commentary")
+    elif exec_count >= 1:
+        score += 0.15
+        relevance_signals.append("some_exec_signals")
+    
+    if score >= 0.7:
+        label = "highly_relevant"
+    elif score >= 0.5:
+        label = "relevant"
+    elif score >= 0.3:
+        label = "partially_relevant"
+    else:
+        label = "low_relevance"
+    
+    explanation = f"Relevance: {', '.join(relevance_signals) if relevance_signals else 'minimal relevance signals'}"
+    return EvaluationResult(score=score, label=label, explanation=explanation)
+
+
+def earnings_call_speaker_accuracy(output: str, dataset_row: Dict[str, Any]) -> EvaluationResult:
+    """
+    Evaluate if speaker attributions are accurate and appropriate.
+    
+    CEOs typically discuss strategy/vision, CFOs discuss financials/guidance.
+    """
+    output_lower = output.lower()
+    query_type = dataset_row.get("query_type", "")
+    query = dataset_row.get("input", "").lower()
+    
+    # Only apply to data_store queries
+    if query_type != "data_store":
+        return EvaluationResult(
+            score=1.0,
+            label="not_applicable",
+            explanation="Not an earnings call query"
+        )
+    
+    # Check for speaker mentions
+    ceo_mentions = bool(re.search(r'\bceo\b|chief executive', output_lower))
+    cfo_mentions = bool(re.search(r'\bcfo\b|chief financial', output_lower))
+    analyst_mentions = bool(re.search(r'\banalyst\b', output_lower))
+    
+    # Check query topic to validate speaker appropriateness
+    is_financial_query = any(w in query for w in ["revenue", "margin", "profit", "guidance", "financial", "earnings"])
+    is_strategy_query = any(w in query for w in ["strategy", "vision", "challenge", "priority", "ai", "product"])
+    is_qa_query = any(w in query for w in ["analyst", "question", "q&a"])
+    
+    score = 0.5  # Base score
+    issues = []
+    
+    # Financial queries should reference CFO
+    if is_financial_query and cfo_mentions:
+        score += 0.25
+    elif is_financial_query and not cfo_mentions and not ceo_mentions:
+        issues.append("financial_query_no_exec_cited")
+    
+    # Strategy queries should reference CEO
+    if is_strategy_query and ceo_mentions:
+        score += 0.25
+    elif is_strategy_query and not ceo_mentions and not cfo_mentions:
+        issues.append("strategy_query_no_exec_cited")
+    
+    # Q&A queries should mention analysts
+    if is_qa_query and analyst_mentions:
+        score += 0.25
+    
+    # Bonus for having any executive attribution
+    if ceo_mentions or cfo_mentions:
+        score = min(1.0, score + 0.1)
+    
+    score = min(1.0, score)
+    
+    if score >= 0.75:
+        label = "accurate_attribution"
+    elif score >= 0.5:
+        label = "partial_attribution"
+    else:
+        label = "weak_attribution"
+    
+    explanation = f"CEO: {'✓' if ceo_mentions else '✗'}, CFO: {'✓' if cfo_mentions else '✗'}, Analyst: {'✓' if analyst_mentions else '✗'}"
+    if issues:
+        explanation += f" Issues: {', '.join(issues)}"
+    
+    return EvaluationResult(score=score, label=label, explanation=explanation)
+
+
+def earnings_call_quarter_accuracy(output: str, dataset_row: Dict[str, Any]) -> EvaluationResult:
+    """
+    Evaluate if the correct earnings call quarter is referenced.
+    
+    The data store contains Q2 2025 and Q3 2025 earnings calls.
+    """
+    output_lower = output.lower()
+    query_type = dataset_row.get("query_type", "")
+    expected_quarter = dataset_row.get("expected_quarter", "")
+    
+    # Only apply to data_store queries
+    if query_type != "data_store":
+        return EvaluationResult(
+            score=1.0,
+            label="not_applicable",
+            explanation="Not an earnings call query"
+        )
+    
+    # Check for quarter mentions
+    q2_2025 = bool(re.search(r'q2\s*2025|q2\s*\'?25', output_lower))
+    q3_2025 = bool(re.search(r'q3\s*2025|q3\s*\'?25', output_lower))
+    any_quarter = bool(re.search(r'q[1-4]\s*\d{4}', output_lower))
+    
+    # Valid quarters in our data store
+    valid_quarters = ["q2 2025", "q3 2025"]
+    
+    # Check for invalid/outdated quarters (shouldn't reference old data)
+    old_quarters = bool(re.search(r'q[1-4]\s*202[0-4]|q[1-4]\s*201\d', output_lower))
+    
+    if expected_quarter:
+        # If specific quarter expected, check for it
+        expected_found = expected_quarter.lower() in output_lower
+        if expected_found:
+            return EvaluationResult(
+                score=1.0,
+                label="correct_quarter",
+                explanation=f"Expected quarter {expected_quarter} found"
+            )
+        elif any_quarter:
+            return EvaluationResult(
+                score=0.5,
+                label="wrong_quarter",
+                explanation=f"Different quarter cited (expected {expected_quarter})"
+            )
+    
+    # General check - should reference 2025 quarters
+    if q2_2025 or q3_2025:
+        return EvaluationResult(
+            score=1.0,
+            label="valid_quarter",
+            explanation=f"Valid 2025 quarter referenced (Q2: {'✓' if q2_2025 else '✗'}, Q3: {'✓' if q3_2025 else '✗'})"
+        )
+    elif old_quarters:
+        return EvaluationResult(
+            score=0.3,
+            label="outdated_quarter",
+            explanation="References outdated quarter (data store has Q2/Q3 2025)"
+        )
+    elif any_quarter:
+        return EvaluationResult(
+            score=0.7,
+            label="quarter_referenced",
+            explanation="Quarter referenced but not from 2025"
+        )
+    else:
+        return EvaluationResult(
+            score=0.5,
+            label="no_quarter",
+            explanation="No quarter reference found in response"
+        )
+
+
+def earnings_call_rag_grounding(output: str, dataset_row: Dict[str, Any]) -> EvaluationResult:
+    """
+    Evaluate if the response appears grounded in actual earnings call data.
+    
+    Checks for signals that indicate the response is based on RAG retrieval
+    rather than general knowledge or hallucination.
+    """
+    output_lower = output.lower()
+    query_type = dataset_row.get("query_type", "")
+    
+    # Only apply to data_store queries
+    if query_type != "data_store":
+        return EvaluationResult(
+            score=1.0,
+            label="not_applicable",
+            explanation="Not an earnings call query"
+        )
+    
+    score = 0.0
+    grounding_signals = []
+    
+    # Signal 1: Specific quotes or paraphrases (more flexible patterns)
+    quote_patterns = [
+        r'"[^"]{15,}"',  # Quoted text (15+ chars)
+        r'".*?"',  # Any quoted text
+        r'said[,:]?\s*"',  # "said" followed by quote
+        r'stated[,:]?\s*"',
+        r'noted[,:]?\s*"',
+        r'emphasized[,:]?\s*"',
+    ]
+    has_quotes = any(re.search(p, output) for p in quote_patterns)
+    if has_quotes:
+        score += 0.35  # Increased weight
+        grounding_signals.append("direct_quotes")
+    
+    # Signal 2: Specific numbers/metrics from earnings
+    earnings_metrics = [
+        r'\$[\d,]+\.?\d*\s*(million|billion|b|m)?',  # Revenue figures (optional unit)
+        r'\d+\.?\d*%',  # Any percentage
+        r'(revenue|earnings|profit|margin|growth).*[\d]+',  # Specific financials
+        r'q[1-4]\s*(20\d{2}|revenue|earnings)',  # Quarter references with data
+    ]
+    has_metrics = any(re.search(p, output_lower) for p in earnings_metrics)
+    if has_metrics:
+        score += 0.25  # Increased weight
+        grounding_signals.append("specific_metrics")
+    
+    # Signal 3: Attribution language (more patterns)
+    attribution_patterns = [
+        r'according to',
+        r'(ceo|cfo|management|chief)\s+(said|stated|noted|mentioned|emphasized|discussed|outlined)',
+        r'during\s+(the|their)\s+(earnings|quarterly)\s+call',
+        r'in\s+(the|their)\s+q[1-4]',
+        r'(tim cook|satya nadella|jensen huang|sundar pichai|andy jassy)',  # Known CEOs
+        r'\*\*\[source:',  # Citation format
+    ]
+    has_attribution = any(re.search(p, output_lower) for p in attribution_patterns)
+    if has_attribution:
+        score += 0.3  # Increased weight
+        grounding_signals.append("attribution_language")
+    
+    # Signal 4: Earnings call specific terminology
+    ec_terms = [
+        "earnings call", "quarterly call", "prepared remarks",
+        "q&a session", "guidance", "outlook", "forward-looking",
+        "analyst question", "management response", "earnings transcript",
+        "strategic priorities", "backlog"
+    ]
+    ec_term_count = sum(1 for term in ec_terms if term in output_lower)
+    if ec_term_count >= 2:
+        score += 0.2
+        grounding_signals.append("ec_terminology")
+    elif ec_term_count >= 1:
+        score += 0.1
+        grounding_signals.append("some_ec_terms")
+    
+    # Signal 5: Source citation present (higher weight - this is key for RAG)
+    if re.search(r'\[source:', output_lower) or "citation:" in output_lower or "📎" in output:
+        score += 0.2  # Increased weight
+        grounding_signals.append("source_citation")
+    
+    score = min(1.0, score)
+    
+    if score >= 0.7:
+        label = "well_grounded"
+    elif score >= 0.5:
+        label = "partially_grounded"
+    elif score >= 0.3:
+        label = "weakly_grounded"
+    else:
+        label = "likely_ungrounded"
+    
+    explanation = f"Grounding signals: {', '.join(grounding_signals) if grounding_signals else 'none detected'}"
+    return EvaluationResult(score=score, label=label, explanation=explanation)
+
+
+def earnings_call_response_format(output: str, dataset_row: Dict[str, Any]) -> EvaluationResult:
+    """
+    Evaluate overall format and structure of earnings call responses.
+    
+    Good responses should have:
+    - Clear structure
+    - Citations
+    - Speaker attribution
+    - Relevant content
+    """
+    output_lower = output.lower()
+    query_type = dataset_row.get("query_type", "")
+    
+    # Only apply to data_store queries
+    if query_type != "data_store":
+        return EvaluationResult(
+            score=1.0,
+            label="not_applicable",
+            explanation="Not an earnings call query"
+        )
+    
+    score = 0.0
+    format_elements = []
+    
+    # Check 1: Has structure (headers, bullets, sections)
+    structure_patterns = [
+        r'\*\*[^*]+\*\*',  # Bold headers
+        r'^[-•]\s+',  # Bullet points
+        r'^\d+\.',  # Numbered lists
+        r'\n\n',  # Paragraph breaks
+    ]
+    has_structure = any(re.search(p, output, re.MULTILINE) for p in structure_patterns)
+    if has_structure:
+        score += 0.2
+        format_elements.append("structured")
+    
+    # Check 2: Appropriate length
+    word_count = len(output.split())
+    if 50 <= word_count <= 500:
+        score += 0.2
+        format_elements.append("good_length")
+    elif word_count > 500:
+        score += 0.1
+        format_elements.append("verbose")
+    elif word_count < 50:
+        format_elements.append("too_brief")
+    
+    # Check 3: Has citations (critical for RAG)
+    has_citations = bool(re.search(r'\[source:|citation:|📎', output_lower))
+    if has_citations:
+        score += 0.3
+        format_elements.append("cited")
+    
+    # Check 4: Has speaker attribution
+    has_speaker = bool(re.search(r'(ceo|cfo|chief|analyst|management)', output_lower))
+    if has_speaker:
+        score += 0.2
+        format_elements.append("speaker_attributed")
+    
+    # Check 5: No error messages
+    error_patterns = ["error", "unable to", "couldn't find", "no results", "not found"]
+    has_errors = any(p in output_lower for p in error_patterns)
+    if not has_errors:
+        score += 0.1
+        format_elements.append("no_errors")
+    else:
+        format_elements.append("contains_errors")
+    
+    if score >= 0.8:
+        label = "excellent_format"
+    elif score >= 0.6:
+        label = "good_format"
+    elif score >= 0.4:
+        label = "acceptable_format"
+    else:
+        label = "poor_format"
+    
+    explanation = f"Format elements: {', '.join(format_elements)}"
     return EvaluationResult(score=score, label=label, explanation=explanation)
 
 
@@ -3016,6 +3519,93 @@ def get_finance_agent_test_dataset() -> list[Dict[str, Any]]:
         },
         
         # =================================================================
+        # DATA STORE AGENT TEST CASES - Earnings Call RAG
+        # =================================================================
+        {
+            "input": "What did Apple's CEO say about AI in their latest earnings call?",
+            "expected_ticker": "AAPL",
+            "company_name": "Apple",
+            "is_valid_sp500": True,
+            "expected_tools": ["search_earnings_calls"],
+            "query_type": "data_store",
+            "expected_agent": "data_store_agent",
+            "expected_complexity": "complex",
+            "expected_quarter": "Q3 2025",
+        },
+        {
+            "input": "Tell me about Microsoft's most important challenges from their earnings call",
+            "expected_ticker": "MSFT",
+            "company_name": "Microsoft",
+            "is_valid_sp500": True,
+            "expected_tools": ["search_earnings_calls"],
+            "query_type": "data_store",
+            "expected_agent": "data_store_agent",
+            "expected_complexity": "complex",
+        },
+        {
+            "input": "What guidance did NVDA give for next quarter?",
+            "expected_ticker": "NVDA",
+            "company_name": "Nvidia",
+            "is_valid_sp500": True,
+            "expected_tools": ["search_earnings_calls"],
+            "query_type": "data_store",
+            "expected_agent": "data_store_agent",
+            "expected_complexity": "complex",
+        },
+        {
+            "input": "What are tech companies saying about cloud growth in their earnings calls?",
+            "expected_ticker": "",
+            "company_name": "",
+            "is_valid_sp500": True,
+            "expected_tools": ["search_earnings_calls"],
+            "query_type": "data_store",
+            "expected_agent": "data_store_agent",
+            "expected_complexity": "complex",
+        },
+        {
+            "input": "Find what Tesla's CFO said about margins in Q3 2025",
+            "expected_ticker": "TSLA",
+            "company_name": "Tesla",
+            "is_valid_sp500": True,
+            "expected_tools": ["search_earnings_calls"],
+            "query_type": "data_store",
+            "expected_agent": "data_store_agent",
+            "expected_complexity": "complex",
+            "expected_quarter": "Q3 2025",
+        },
+        {
+            "input": "What questions did analysts ask Amazon about AWS?",
+            "expected_ticker": "AMZN",
+            "company_name": "Amazon",
+            "is_valid_sp500": True,
+            "expected_tools": ["search_earnings_calls"],
+            "query_type": "data_store",
+            "expected_agent": "data_store_agent",
+            "expected_complexity": "complex",
+        },
+        {
+            "input": "What are Google's strategic priorities according to their CEO?",
+            "expected_ticker": "GOOGL",
+            "company_name": "Google",
+            "is_valid_sp500": True,
+            "expected_tools": ["search_earnings_calls"],
+            "query_type": "data_store",
+            "expected_agent": "data_store_agent",
+            "expected_complexity": "complex",
+        },
+        {
+            "input": "Search for mentions of supply chain issues in Q2 2025 earnings",
+            "expected_ticker": "",
+            "company_name": "",
+            "is_valid_sp500": True,
+            "expected_tools": ["search_earnings_calls"],
+            "query_type": "data_store",
+            "expected_agent": "data_store_agent",
+            "expected_complexity": "complex",
+            "expected_quarter": "Q2 2025",
+        },
+        
+        # =================================================================
         # PORTFOLIO AGENT TEST CASES - Analysis
         # =================================================================
         {
@@ -3147,6 +3737,12 @@ def get_portfolio_test_dataset() -> list[Dict[str, Any]]:
             if row.get("query_type") == "portfolio"]
 
 
+def get_data_store_test_dataset() -> list[Dict[str, Any]]:
+    """Get only data store/earnings call RAG test cases."""
+    return [row for row in get_finance_agent_test_dataset() 
+            if row.get("query_type") == "data_store"]
+
+
 def get_model_routing_test_dataset() -> list[Dict[str, Any]]:
     """Get test cases specifically for model routing evaluation."""
     return [row for row in get_finance_agent_test_dataset() 
@@ -3224,6 +3820,16 @@ def run_local_evaluations(
         ("portfolio_performance_comparison", portfolio_performance_comparison),
     ]
     
+    # Data store agent evaluators (earnings call RAG)
+    data_store_evaluators = [
+        ("earnings_call_citation_format", earnings_call_citation_format),
+        ("earnings_call_content_relevance", earnings_call_content_relevance),
+        ("earnings_call_speaker_accuracy", earnings_call_speaker_accuracy),
+        ("earnings_call_quarter_accuracy", earnings_call_quarter_accuracy),
+        ("earnings_call_rag_grounding", earnings_call_rag_grounding),
+        ("earnings_call_response_format", earnings_call_response_format),
+    ]
+    
     # Universal evaluators that apply to all query types
     universal_evaluators = [
         ("response_contains_data", response_contains_data),
@@ -3258,6 +3864,8 @@ def run_local_evaluations(
             applicable_evals.extend(headlines_evaluators)
         elif query_type == "portfolio":
             applicable_evals.extend(portfolio_evaluators)
+        elif query_type == "data_store":
+            applicable_evals.extend(data_store_evaluators)
         elif query_type == "cross_domain":
             # Cross-domain gets both market and economic
             applicable_evals.extend(market_evaluators)
@@ -3381,6 +3989,25 @@ def run_portfolio_evaluations(outputs: list[str], dataset: Optional[list[Dict[st
     return run_local_evaluations(outputs, dataset, evaluators)
 
 
+def run_data_store_evaluations(outputs: list[str], dataset: Optional[list[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Run only data store/earnings call RAG related evaluations."""
+    if dataset is None:
+        dataset = get_data_store_test_dataset()
+    
+    evaluators = [
+        ("earnings_call_citation_format", earnings_call_citation_format),
+        ("earnings_call_content_relevance", earnings_call_content_relevance),
+        ("earnings_call_speaker_accuracy", earnings_call_speaker_accuracy),
+        ("earnings_call_quarter_accuracy", earnings_call_quarter_accuracy),
+        ("earnings_call_rag_grounding", earnings_call_rag_grounding),
+        ("earnings_call_response_format", earnings_call_response_format),
+        ("response_contains_data", response_contains_data),
+        ("agent_delegation_accuracy", agent_delegation_accuracy),
+    ]
+    
+    return run_local_evaluations(outputs, dataset, evaluators)
+
+
 def print_evaluation_report(results: Dict[str, Any]):
     """Print a formatted evaluation report."""
     print("\n" + "="*70)
@@ -3412,6 +4039,14 @@ def print_evaluation_report(results: Dict[str, Any]):
             "portfolio_allocation_validation",
             "portfolio_rebalancing_quality",
             "portfolio_performance_comparison",
+        ],
+        "Data Store Agent Evaluators (Earnings Call RAG)": [
+            "earnings_call_citation_format",
+            "earnings_call_content_relevance",
+            "earnings_call_speaker_accuracy",
+            "earnings_call_quarter_accuracy",
+            "earnings_call_rag_grounding",
+            "earnings_call_response_format",
         ],
         "Response Quality Evaluators": [
             "response_contains_data",
@@ -3495,6 +4130,16 @@ PORTFOLIO_EVALUATORS = [
     portfolio_performance_comparison,
 ]
 
+# Evaluators for data store (earnings call RAG)
+DATA_STORE_EVALUATORS = [
+    earnings_call_citation_format,
+    earnings_call_content_relevance,
+    earnings_call_speaker_accuracy,
+    earnings_call_quarter_accuracy,
+    earnings_call_rag_grounding,
+    earnings_call_response_format,
+]
+
 # Evaluators for model routing and agent delegation
 ROUTING_EVALUATORS = [
     model_routing_accuracy,
@@ -3527,6 +4172,13 @@ ALL_EVALUATORS = [
     portfolio_allocation_validation,
     portfolio_rebalancing_quality,
     portfolio_performance_comparison,
+    # Data Store (Earnings Call RAG)
+    earnings_call_citation_format,
+    earnings_call_content_relevance,
+    earnings_call_speaker_accuracy,
+    earnings_call_quarter_accuracy,
+    earnings_call_rag_grounding,
+    earnings_call_response_format,
     # Universal
     response_contains_data,
     financial_accuracy,
@@ -3945,6 +4597,7 @@ if __name__ == "__main__":
     parser.add_argument("--economic", action="store_true", help="Run only economic data evaluations")
     parser.add_argument("--headlines", action="store_true", help="Run only headlines/news evaluations")
     parser.add_argument("--portfolio", action="store_true", help="Run only portfolio analysis evaluations")
+    parser.add_argument("--data-store", action="store_true", dest="data_store", help="Run only data store (earnings call RAG) evaluations")
     parser.add_argument("--routing", action="store_true", help="Run only routing/delegation evaluations")
     parser.add_argument("--name", type=str, default="finance_eval_test", help="Experiment name")
     args = parser.parse_args()
@@ -4007,7 +4660,17 @@ if __name__ == "__main__":
         '📰 **Tesla (TSLA) Analyst Coverage**\n\n1. **"Tesla Faces Headwinds From EV Competition"** - *Reuters*\n   Analysts note margin pressure from price cuts.\n   Today | Sentiment: Mixed ⚠️\n\n2. **"TSLA: Buy, Sell, or Hold?"** - *CNBC*\n   Analysts remain divided on Tesla valuation.\n   Yesterday | Sentiment: Neutral',
         '📰 **Breaking News: Amazon (AMZN)**\n\n1. **"Amazon AWS Signs Major Government Contract"** - *WSJ*\n   $10B cloud deal announced today. Stock up 3%.\n   Just now | Sentiment: Bullish 🟢\n\n2. **"Amazon Prime Day Breaks Records"** - *Bloomberg*\n   Retail segment shows strong consumer demand.\n   Sentiment: Positive ✅',
         
-        # Portfolio Agent - Analysis (3)
+        # Data Store Agent - Earnings Call RAG (8) - COMES BEFORE Portfolio in test dataset!
+        '**Apple AI Strategy from Q3 2025 Earnings Call**\n\nTim Cook, CEO, emphasized Apple\'s commitment to AI integration across all products:\n\n"We believe AI will fundamentally transform how people interact with technology. Apple Intelligence is just the beginning - we\'re investing heavily in on-device AI capabilities that prioritize privacy while delivering powerful features."\n\nHe noted that AI features drove significant iPhone 16 upgrades and new customer acquisition.\n\n📎 Citation: **[Source: AAPL Q3 2025 Earnings Call - Tim Cook, CEO]**',
+        '**Microsoft\'s Key Challenges from Earnings Call**\n\nSatya Nadella, CEO, discussed several challenges facing the company:\n\n1. **Cloud Competition**: "Azure continues to face pricing pressure from AWS and Google Cloud. We\'re responding with differentiated AI capabilities."\n\n2. **AI Infrastructure Costs**: CFO Amy Hood noted: "Data center capex increased 45% YoY to support AI workloads. We expect this investment level to continue."\n\n3. **Enterprise Adoption**: "Some customers are taking longer to adopt Copilot than expected," Nadella acknowledged.\n\n📎 Citation: **[Source: MSFT Q3 2025 Earnings Call - Satya Nadella, CEO]**\n📎 Citation: **[Source: MSFT Q3 2025 Earnings Call - Amy Hood, CFO]**',
+        '**NVIDIA Q4 Guidance from Q3 2025 Earnings Call**\n\nJensen Huang, CEO, provided strong guidance for next quarter:\n\n"We expect Q4 revenue of $32-33 billion, up 85% year-over-year. Data center demand remains insatiable as enterprises race to build AI infrastructure."\n\nCFO Colette Kress added: "Gross margins should remain above 70% despite supply constraints. We\'re expanding production capacity with TSMC."\n\n📎 Citation: **[Source: NVDA Q3 2025 Earnings Call - Jensen Huang, CEO]**\n📎 Citation: **[Source: NVDA Q3 2025 Earnings Call - Colette Kress, CFO]**',
+        '**Tech Companies on Cloud Growth - Cross-Company Analysis**\n\n**Microsoft (MSFT)**: "Azure revenue grew 29% with AI services contributing 8 points of growth" - Satya Nadella, CEO\n**[Source: MSFT Q3 2025 Earnings Call - Satya Nadella, CEO]**\n\n**Amazon (AMZN)**: "AWS achieved $25 billion quarterly revenue, with generative AI as the fastest-growing segment" - Andy Jassy, CEO\n**[Source: AMZN Q3 2025 Earnings Call - Andy Jassy, CEO]**\n\n**Google (GOOGL)**: "Google Cloud crossed $10 billion quarterly revenue for the first time, driven by AI workloads" - Sundar Pichai, CEO\n**[Source: GOOGL Q3 2025 Earnings Call - Sundar Pichai, CEO]**\n\nAll three hyperscalers reported AI as the primary growth driver.',
+        '**Tesla CFO on Margins - Q3 2025 Earnings Call**\n\nVaibhav Taneja, CFO, addressed margin concerns directly:\n\n"Automotive gross margins came in at 17.1%, down from 18.2% last quarter. This reflects:\n1. Price reductions to stimulate demand\n2. Cybertruck production ramp costs\n3. Higher raw material costs\n\nWe expect margins to stabilize in Q4 as Cybertruck achieves scale and new production efficiencies take hold."\n\nIn response to an analyst question about FSD pricing: "Full Self-Driving subscription continues to grow and provides high-margin recurring revenue."\n\n📎 Citation: **[Source: TSLA Q3 2025 Earnings Call - Vaibhav Taneja, CFO]**',
+        '**Analyst Q&A on Amazon AWS**\n\nDuring the Q3 2025 earnings call, analysts pressed management on AWS:\n\n**Morgan Stanley Analyst**: "Can you quantify the AI contribution to AWS growth?"\n\n**Andy Jassy, CEO**: "Generative AI services are now a multi-billion dollar annual revenue run rate within AWS. We\'re seeing particular strength in Bedrock and custom chip offerings like Trainium."\n\n**Goldman Sachs Analyst**: "How sustainable is the 19% AWS growth rate?"\n\n**Brian Olsavsky, CFO**: "We see strong enterprise demand continuing. Our backlog grew to $156 billion, up from $150 billion last quarter."\n\n📎 Citation: **[Source: AMZN Q3 2025 Earnings Call - Andy Jassy, CEO]**\n📎 Citation: **[Source: AMZN Q3 2025 Earnings Call - Brian Olsavsky, CFO]**',
+        '**Google\'s Strategic Priorities - CEO Perspective**\n\nSundar Pichai, CEO, outlined Google\'s key strategic priorities during Q3 2025:\n\n"Our three strategic priorities remain:\n\n1. **AI-First Products**: Gemini is now integrated across Search, Workspace, and Cloud. We\'re seeing strong user engagement with AI Overviews.\n\n2. **Cloud Growth**: Google Cloud is our fastest-growing segment. AI is driving new enterprise wins against established competitors.\n\n3. **Responsible AI Development**: We\'re committed to developing AI responsibly while maintaining our competitive position."\n\nOn competition: "We believe our end-to-end AI stack - from TPUs to Gemini models to Cloud services - provides unique value."\n\n📎 Citation: **[Source: GOOGL Q3 2025 Earnings Call - Sundar Pichai, CEO]**',
+        '**Supply Chain Issues in Q2 2025 Earnings**\n\nSeveral S&P 500 companies discussed supply chain challenges in Q2 2025:\n\n**Apple (AAPL)** - Tim Cook: "We continue to navigate component constraints, particularly for advanced chips. Lead times have improved but remain elevated."\n**[Source: AAPL Q2 2025 Earnings Call - Tim Cook, CEO]**\n\n**Ford (F)** - Jim Farley, CEO: "Battery supply constraints limited EV production by approximately 15,000 units this quarter."\n**[Source: F Q2 2025 Earnings Call - Jim Farley, CEO]**\n\n**Caterpillar (CAT)** - Jim Umpleby, CEO: "We\'ve built safety stock to buffer against ongoing semiconductor volatility."\n**[Source: CAT Q2 2025 Earnings Call - Jim Umpleby, CEO]**\n\nOverall, supply chain issues are easing but remain a factor for many companies.',
+        
+        # Portfolio Agent - Analysis (3) - COMES AFTER Data Store in test dataset!
         '📊 **Portfolio Analysis**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n**Total Value:** $52,450.00\n**Daily Change:** +$523.15 (+1.01%)\n**Holdings:** 3 positions\n\n📈 **Holdings Breakdown**\n\n**AAPL** - Apple Inc.\n  • Shares: 100 @ $178.25\n  • Value: $17,825.00 (34.0%)\n  • Sector: Technology\n\n**MSFT** - Microsoft Corp.\n  • Shares: 50 @ $425.80\n  • Value: $21,290.00 (40.6%)\n  • Sector: Technology\n\n**GOOGL** - Alphabet Inc.\n  • Shares: 25 @ $533.40\n  • Value: $13,335.00 (25.4%)\n  • Sector: Technology\n\n🏢 **Sector Allocation**\n  Technology        ████████████████████ 100.0%\n\n⚠️ **Concentration Warning**: 100% in Technology sector',
         '📊 **Portfolio Summary**\n\n**Total Value:** $121,060.00\n**Holdings:** 2 positions\n\n• NVDA: 200 shares @ $485.00 = $97,000.00 (80.1%)\n• TSLA: 100 shares @ $240.60 = $24,060.00 (19.9%)\n\n⚠️ **Concentration Warning**: Top position (NVDA) is 80.1% - consider reducing',
         '📊 **Sector Allocation Analysis**\n\n**Portfolio:** 50 AAPL, 30 JPM, 40 JNJ\n\n• Technology (AAPL): 45.2%\n• Financials (JPM): 32.1%\n• Healthcare (JNJ): 22.7%\n\n✅ **Diversification**: Portfolio appears reasonably diversified across 3 sectors',
@@ -4052,9 +4715,16 @@ if __name__ == "__main__":
     elif args.portfolio:
         print("Running portfolio analysis evaluations...")
         portfolio_dataset = get_portfolio_test_dataset()
-        # Portfolio outputs start at index 30
-        portfolio_outputs = mock_outputs[30:39]
+        # Portfolio outputs start at index 38 (after data_store: 30-37)
+        portfolio_outputs = mock_outputs[38:47]
         results = run_portfolio_evaluations(portfolio_outputs, portfolio_dataset)
+        print_evaluation_report(results)
+    elif args.data_store:
+        print("Running data store (earnings call RAG) evaluations...")
+        data_store_dataset = get_data_store_test_dataset()
+        # Data store outputs start at index 30 (before portfolio)
+        data_store_outputs = mock_outputs[30:38]
+        results = run_data_store_evaluations(data_store_outputs, data_store_dataset)
         print_evaluation_report(results)
     elif args.routing:
         print("Running routing/delegation evaluations...")
@@ -4070,7 +4740,7 @@ if __name__ == "__main__":
         # Default: run full local evaluation
         print("Running comprehensive local evaluation...")
         print("(Use --arize flag to log to Arize GUI)")
-        print("(Use --market, --economic, --headlines, --portfolio, or --routing for focused evaluations)")
+        print("(Use --market, --economic, --headlines, --portfolio, --data-store, or --routing for focused evaluations)")
         print()
         results = run_local_evaluations(mock_outputs)
         print_evaluation_report(results)

@@ -142,7 +142,7 @@ def add_custom_trace_attributes():
         span.set_attribute("datastore", os.getenv("DATA_STORE_ID", "finance-data"))
 
 
-# Legacy compatibility - keep instrument decorator for API clients
+# Manual instrumentation decorator for non-ADK functions (API clients, utilities)
 def instrument(name: Optional[str] = None):
     """
     Decorator to manually instrument functions with OpenTelemetry tracing.

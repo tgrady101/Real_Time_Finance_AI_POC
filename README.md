@@ -4,7 +4,7 @@ S&P 500-focused AI chatbot with multi-agent architecture for comprehensive finan
 
 ## Features
 
-- **Multi-Agent Architecture**: Root Orchestrator with 4 specialized sub-agents (Market Data, Economic, Headlines, Portfolio)
+- **Multi-Agent Architecture**: Root Orchestrator with 5 specialized sub-agents (Market Data, Economic, Headlines, Portfolio, Data Store)
 - **Dynamic Model Routing**: Automatic selection between gemini-2.5-flash (simple) and gemini-3-pro-preview (complex)
 - **Real-Time Data**: Yahoo Finance MCP Server for stock prices and fundamentals
 - **Economic Data**: FRED API integration for GDP, inflation, unemployment, interest rates
@@ -12,7 +12,8 @@ S&P 500-focused AI chatbot with multi-agent architecture for comprehensive finan
 - **Portfolio Analysis**: Risk metrics, allocation breakdown, rebalancing recommendations
 - **S&P 500 Scope**: 500 companies with ticker validation and fuzzy matching
 - **Persistent Memory**: PostgreSQL-backed cross-session recall with `load_memory` tool
-- **Observability**: Arize AX for LLM tracing + 19-evaluator test suite (96.9% pass rate)
+- **Earnings Call RAG**: Vertex AI Data Store for Q2/Q3 2025 S&P 500 earnings transcripts with citations
+- **Observability**: Arize AX for LLM tracing + 25-evaluator test suite 
 
 ## Quick Start
 
@@ -66,6 +67,7 @@ Root Orchestrator (dynamic model routing)
 ├── Economic Agent (FRED API) - GDP, inflation, unemployment, rates
 ├── Headlines Agent (Google Search) - News, earnings, sentiment
 ├── Portfolio Agent (yfinance + numpy) - Risk, allocation, rebalancing
+├── Data Store Agent (Vertex AI RAG) - Earnings call transcripts with citations
 ├── S&P 500 Validation Tools
 └── Memory Tools (load_memory for cross-session recall)
 ```
@@ -92,6 +94,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for comprehensive architecture 
 - "Analyze my portfolio: 100 AAPL, 50 MSFT, 200 GOOGL"
 - "What's the risk profile of my holdings?"
 
+**Earnings Call RAG:**
+- "What did Apple's CEO say about AI in the Q3 2025 earnings call?"
+- "What are Microsoft's revenue growth projections?"
+- "Summarize Tesla's Q2 2025 earnings highlights"
+
 **Memory Recall:**
 - "What questions have I asked in the past?"
 
@@ -105,7 +112,7 @@ Real_Time_Finance_AI_POC/
 │   ├── mcp_servers/        # Bundled Yahoo Finance MCP
 │   └── workflow_1/
 │       ├── agents/         # Root + Market Data agents
-│       ├── api_clients/    # FRED, NewsAPI (future use)
+│       ├── api_clients/    # FRED API client
 │       ├── mcp_clients/    # Yahoo Finance MCP client
 │       ├── memory/         # PostgresMemoryService
 │       ├── arize_observability/

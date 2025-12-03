@@ -19,7 +19,7 @@ resource "google_storage_bucket_iam_member" "storage_admin" {
   member = "serviceAccount:${google_service_account.finance_chatbot.email}"
 }
 
-# IAM binding: Vertex AI User (for embeddings generation)
+# IAM binding: Vertex AI User (for Discovery Engine RAG and Model Garden)
 resource "google_project_iam_member" "vertex_ai_user" {
   project = var.project_id
   role    = "roles/aiplatform.user"

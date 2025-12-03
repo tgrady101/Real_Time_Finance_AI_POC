@@ -264,7 +264,6 @@ def run_docker():
         env_args.extend(["-e", var])
     
     # Add additional env vars from .env
-    # Note: NEWS_API_KEY is deprecated - headlines_agent uses Google Search
     for key in ["FRED_API_KEY", "ARIZE_API_KEY", "ARIZE_SPACE_ID"]:
         value = os.getenv(key)
         if value:

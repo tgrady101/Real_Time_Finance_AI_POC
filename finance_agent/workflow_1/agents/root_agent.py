@@ -7,7 +7,7 @@ coordinates specialized sub-agents to handle different types of financial querie
 - economic_agent: Economic indicators via FRED API (GDP, inflation, unemployment, rates)
 - headlines_agent: Recent news and headlines via Google Search
 - portfolio_agent: Portfolio analysis, risk metrics, and rebalancing
-- (TO BE BUILT) data_store_agent: SEC filings via Vertex AI RAG
+- data_store_agent: Earnings call transcripts via Vertex AI RAG (Q2/Q3 2025)
 
 The root agent uses LLM-based delegation to route queries to the appropriate
 sub-agent based on user intent.
@@ -91,7 +91,20 @@ You have tools to validate stocks against the official S&P 500 list (from Wikipe
    - Rebalancing recommendations
    - Diversification analysis
 
-5. **General Questions & Memory** → Handle yourself (DO NOT DELEGATE)
+5. **Earnings Call Transcripts & Executive Commentary** → Delegate to `data_store_agent`
+   - What did management say about specific topics
+   - CEO/CFO commentary from earnings calls
+   - Executive perspectives on challenges, opportunities, strategy
+   - Company guidance and outlook from executives
+   - Management's view on competition, market trends, risks
+   - Analyst Q&A from earnings calls
+   - Cross-company earnings themes
+   - Q2 2025 and Q3 2025 earnings call content
+   - **USE THIS for questions about what executives/management think, said, or believe**
+   - **USE THIS for "most important challenges", "biggest risks", "key priorities"**
+   - **USE THIS when user wants QUALITATIVE insights grounded in executive commentary**
+
+6. **General Questions & Memory** → Handle yourself (DO NOT DELEGATE)
    - Greetings and farewells
    - Questions about your capabilities
    - Clarification requests
@@ -114,6 +127,7 @@ You have tools to validate stocks against the official S&P 500 list (from Wikipe
 - `headlines_agent`: Recent news and headlines via Google Search (breaking news, earnings, sentiment)
 - `economic_agent`: Economic indicators via FRED API (GDP, inflation, unemployment, interest rates)
 - `portfolio_agent`: Portfolio analysis (value, allocation, risk metrics, performance, rebalancing)
+- `data_store_agent`: Earnings call transcripts from Q2/Q3 2025 via Vertex AI RAG (management commentary, analyst Q&A)
 """
 
 
@@ -157,6 +171,7 @@ def create_root_agent(
     from .economic_agent import create_economic_agent
     from .headlines_agent import create_headlines_agent
     from .portfolio_agent import create_portfolio_agent
+    from .data_store_agent import create_data_store_agent
     
     # Determine models to use
     if model:
@@ -197,6 +212,11 @@ def create_root_agent(
     )
     
     portfolio_agent = create_portfolio_agent(
+        model=sub_agent_model,
+        use_dynamic_routing=use_dynamic_routing,
+    )
+    
+    data_store_agent = create_data_store_agent(
         model=sub_agent_model,
         use_dynamic_routing=use_dynamic_routing,
     )
@@ -276,7 +296,7 @@ DO NOT answer memory questions from your own knowledge - ALWAYS call load_memory
         description="Main finance assistant that coordinates specialized agents for S&P 500 market analysis and economic data.",
         instruction=instruction,
         tools=all_tools,
-        sub_agents=[market_data_agent, headlines_agent, economic_agent, portfolio_agent],
+        sub_agents=[market_data_agent, headlines_agent, economic_agent, portfolio_agent, data_store_agent],
         before_model_callback=dynamic_callback,
         after_agent_callback=after_callback,
     )

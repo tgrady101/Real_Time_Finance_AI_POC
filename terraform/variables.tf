@@ -18,7 +18,7 @@ variable "data_store_location" {
 variable "data_store_id" {
   description = "ID for the Vertex AI Data Store"
   type        = string
-  default     = "financial-filings-datastore"
+  default     = "earnings-call-datastore"
 }
 
 variable "service_account_name" {

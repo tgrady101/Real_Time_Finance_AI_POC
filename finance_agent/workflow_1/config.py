@@ -20,7 +20,6 @@ class Config:
     
     # API Keys
     FRED_API_KEY: str = os.getenv('FRED_API_KEY', '')
-    NEWS_API_KEY: str = os.getenv('NEWS_API_KEY', '')
     ARIZE_SPACE_ID: str = os.getenv('ARIZE_SPACE_ID', '')
     ARIZE_API_KEY: str = os.getenv('ARIZE_API_KEY', '')
     
@@ -28,14 +27,13 @@ class Config:
     GOOGLE_CLOUD_PROJECT: str = os.getenv('GOOGLE_CLOUD_PROJECT', '')
     # Note: gemini-3-pro-preview only supports 'global' region
     GOOGLE_CLOUD_LOCATION: str = os.getenv('GOOGLE_CLOUD_LOCATION', 'global')
-    DATA_STORE_ID: str = os.getenv('DATA_STORE_ID', 'financial-filings-datastore')
+    DATA_STORE_ID: str = os.getenv('DATA_STORE_ID', 'earnings-call-datastore')
     
     # Model Configuration
     # Default model for general use
     # gemini-3-pro-preview requires enabling in Vertex AI Model Garden first
     # Fallback: gemini-2.5-flash works without additional setup
     GEMINI_MODEL: str = os.getenv('GEMINI_MODEL', 'gemini-3-pro-preview')
-    EMBEDDING_MODEL: str = os.getenv('EMBEDDING_MODEL', 'text-embedding-004')
     
     # Model tiers for dynamic routing (via before_model_callback)
     # Complex: For detailed analysis, multi-step reasoning, complex financial queries
@@ -46,12 +44,6 @@ class Config:
     # Agent Parameters
     AGENT_TEMPERATURE: float = float(os.getenv('AGENT_TEMPERATURE', '0.7'))
     AGENT_MAX_TOKENS: int = int(os.getenv('AGENT_MAX_TOKENS', '2048'))
-    
-    # Data Ingestion Configuration
-    MAX_CHUNK_SIZE: int = int(os.getenv('MAX_CHUNK_SIZE', '8000'))
-    CHUNK_OVERLAP: int = int(os.getenv('CHUNK_OVERLAP', '200'))
-    USE_EMBEDDINGS: bool = os.getenv('USE_EMBEDDINGS', 'true').lower() == 'true'
-    EMBEDDING_BATCH_SIZE: int = int(os.getenv('EMBEDDING_BATCH_SIZE', '5'))
     
     # Rate Limiting
     FRED_API_RATE_LIMIT: float = float(os.getenv('FRED_API_RATE_LIMIT', '0.5'))
@@ -102,7 +94,6 @@ Configuration Summary:
 ======================
 API Keys:
   FRED API: {mask_key(cls.FRED_API_KEY)}
-  News API: {mask_key(cls.NEWS_API_KEY)}
   Arize: {mask_key(cls.ARIZE_API_KEY)}
 
 Google Cloud:
@@ -114,14 +105,8 @@ Models:
   Default: {cls.GEMINI_MODEL}
   Complex (analysis): {cls.MODEL_COMPLEX}
   Fast (simple queries): {cls.MODEL_FAST}
-  Embedding: {cls.EMBEDDING_MODEL}
   Temperature: {cls.AGENT_TEMPERATURE}
   Max Tokens: {cls.AGENT_MAX_TOKENS}
-
-Data Ingestion:
-  Chunk Size: {cls.MAX_CHUNK_SIZE}
-  Chunk Overlap: {cls.CHUNK_OVERLAP}
-  Use Embeddings: {cls.USE_EMBEDDINGS}
 """
 
 
