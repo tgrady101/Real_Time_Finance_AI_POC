@@ -7,7 +7,6 @@ The agent provides S&P 500 market data analysis through a multi-agent
 architecture with specialized sub-agents for different data sources.
 """
 
-import os
 import sys
 from pathlib import Path
 

@@ -153,7 +153,7 @@ async def get_yahoo_finance_news(ticker: str) -> str:
 
     # If the company is found, get the news
     try:
-        news = company.news
+        _ = company.news  # Validate news property exists
     except Exception as e:
         print(f"Error: getting news for {ticker}: {e}")
         return f"Error: getting news for {ticker}: {e}"

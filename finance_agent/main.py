@@ -17,7 +17,6 @@ Usage:
     python -m finance_agent.main
 """
 
-import asyncio
 import json
 import os
 import sys

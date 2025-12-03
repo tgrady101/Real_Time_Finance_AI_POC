@@ -31,7 +31,6 @@ class SP500Validator:
         for i, table in enumerate(tables):
             score = 0
             cols_lower = [str(c).lower() for c in table.columns]
-            cols_str = ' '.join(cols_lower)
             
             # Strategy 1: Look for 'symbol' column (strong signal)
             if any('symbol' in c for c in cols_lower):

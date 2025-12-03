@@ -1066,7 +1066,7 @@ def tool_usage_verification(output: str, dataset_row: Dict[str, Any]) -> Evaluat
             explanation=f"Tool verification not applicable for {query_type} queries"
         )
     
-    expected_tools = dataset_row.get("expected_tools", [])
+    _ = dataset_row.get("expected_tools", [])  # Reserved for future tool trace analysis
     is_valid = dataset_row.get("is_valid_sp500", True)
     output_lower = output.lower()
     
@@ -1511,7 +1511,7 @@ def agent_delegation_accuracy(output: str, dataset_row: Dict[str, Any]) -> Evalu
         any(term in output_lower for term in ["headline", "news", "reported", "announced", "breaking"]),
         any(source in output_lower for source in ["bloomberg", "reuters", "cnbc", "wsj", "marketwatch"]),
         any(term in output_lower for term in ["sentiment", "analyst", "coverage"]),
-        bool(re.search(r'[""].*[""]', output)),  # Quoted headlines
+        bool(re.search(r'".*"', output)),  # Quoted headlines
     ]
     headlines_score = sum(1 for s in headlines_signals if s) / len(headlines_signals)
     
@@ -1904,7 +1904,7 @@ def headlines_news_format(output: str, dataset_row: Dict[str, Any]) -> Evaluatio
     
     # Check 1: Has headline markers (quotes, bullet points, bold text)
     headline_patterns = [
-        r'[""].*[""]',  # Quoted headlines
+        r'".*"',  # Quoted headlines
         r'\*\*.*\*\*',  # Bold text (markdown)
         r'^\s*[-•]\s+',  # Bullet points
         r'\d+\.',  # Numbered lists
@@ -2418,8 +2418,7 @@ def earnings_call_quarter_accuracy(output: str, dataset_row: Dict[str, Any]) -> 
     q3_2025 = bool(re.search(r'q3\s*2025|q3\s*\'?25', output_lower))
     any_quarter = bool(re.search(r'q[1-4]\s*\d{4}', output_lower))
     
-    # Valid quarters in our data store
-    valid_quarters = ["q2 2025", "q3 2025"]
+    # Valid quarters in our data store: Q2 2025, Q3 2025
     
     # Check for invalid/outdated quarters (shouldn't reference old data)
     old_quarters = bool(re.search(r'q[1-4]\s*202[0-4]|q[1-4]\s*201\d', output_lower))
@@ -2674,7 +2673,7 @@ def portfolio_analysis_format(output: str, dataset_row: Dict[str, Any]) -> Evalu
     is_risk_query = any(term in query for term in ["risk", "beta", "volatility", "sharpe"])
     is_performance_query = any(term in query for term in ["perform", "return", "compare", "vs spy", "vs qqq"])
     is_rebalance_query = "rebalanc" in query
-    is_general_analysis = "analyze" in query or "value" in query or "allocation" in query or "sector" in query
+    # Note: is_general_analysis not used - specialized queries handled separately below
     
     # If it's a specialized query, don't require full portfolio format
     if is_risk_query or is_performance_query or is_rebalance_query:

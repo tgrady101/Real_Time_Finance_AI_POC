@@ -169,7 +169,7 @@ def instrument(name: Optional[str] = None):
                     span.set_attribute("function.name", func.__name__)
                     span.set_attribute("function.module", func.__module__)
                 except Exception:
-                    pass
+                    pass  # Ignore attribute setting failures
                 
                 try:
                     result = func(*args, **kwargs)

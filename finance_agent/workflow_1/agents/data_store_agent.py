@@ -14,7 +14,7 @@ The data store contains Q2 and Q3 2025 earnings call transcripts for S&P 500 com
 
 import os
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional
 from dotenv import load_dotenv
 
 # Load environment variables
