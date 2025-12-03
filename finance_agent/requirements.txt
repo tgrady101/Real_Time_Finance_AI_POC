@@ -1,0 +1,31 @@
+# Requirements for Cloud Run deployment
+
+# FastAPI and server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.0.0
+
+# Google ADK and AI
+google-adk>=1.19.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# PostgreSQL for session storage
+psycopg2-binary>=2.9.9
+
+# MCP support (for Yahoo Finance MCP server)
+mcp[cli]>=1.6.0
+
+# Yahoo Finance MCP server dependencies (bundled in mcp_servers/)
+yfinance>=0.2.62
+pandas>=2.0.0
+numpy>=1.24.0
+lxml>=4.9.0
+
+# Arize Observability (traces all agent activity)
+arize-otel>=0.10.0
+openinference-instrumentation-google-adk>=0.1.0
+
+# Optional: Arize evaluations (for running experiments)
+# arize>=7.0.0
+# arize-phoenix-evals>=0.10.0
