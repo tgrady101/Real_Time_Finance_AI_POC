@@ -151,23 +151,22 @@ async def get_yahoo_finance_news(ticker: str) -> str:
         print(f"Error: getting news for {ticker}: {e}")
         return f"Error: getting news for {ticker}: {e}"
 
-    # If the company is found, get the news
+    # Get the news for this company
+    news_list = []
     try:
-        _ = company.news  # Validate news property exists
+        for news in company.news:
+            if news.get("content", {}).get("contentType", "") == "STORY":
+                title = news.get("content", {}).get("title", "")
+                summary = news.get("content", {}).get("summary", "")
+                description = news.get("content", {}).get("description", "")
+                url = news.get("content", {}).get("canonicalUrl", {}).get("url", "")
+                news_list.append(
+                    f"Title: {title}\nSummary: {summary}\nDescription: {description}\nURL: {url}"
+                )
     except Exception as e:
         print(f"Error: getting news for {ticker}: {e}")
         return f"Error: getting news for {ticker}: {e}"
 
-    news_list = []
-    for news in company.news:
-        if news.get("content", {}).get("contentType", "") == "STORY":
-            title = news.get("content", {}).get("title", "")
-            summary = news.get("content", {}).get("summary", "")
-            description = news.get("content", {}).get("description", "")
-            url = news.get("content", {}).get("canonicalUrl", {}).get("url", "")
-            news_list.append(
-                f"Title: {title}\nSummary: {summary}\nDescription: {description}\nURL: {url}"
-            )
     if not news_list:
         print(f"No news found for company that searched with {ticker} ticker.")
         return f"No news found for company that searched with {ticker} ticker."
