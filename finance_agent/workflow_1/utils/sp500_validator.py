@@ -15,6 +15,8 @@ class SP500Validator:
     
     def __init__(self):
         self.sp500_list: Dict[str, str] = {}  # ticker -> company_name
+        self.sp500_sectors: Dict[str, str] = {}  # ticker -> sector
+        self.sp500_industries: Dict[str, str] = {}  # ticker -> industry
         self.last_refresh: Optional[datetime] = None
         self.refresh_interval = timedelta(days=7)  # Refresh weekly
 
@@ -98,12 +100,19 @@ class SP500Validator:
             ticker_col = None
             name_col = None
             
+            sector_col = None
+            industry_col = None
+            
             for col in df.columns:
                 col_lower = str(col).lower()
                 if 'symbol' in col_lower or 'ticker' in col_lower:
                     ticker_col = col
                 elif 'security' in col_lower or 'company' in col_lower or 'name' in col_lower:
                     name_col = col
+                elif 'gics sector' in col_lower or col_lower == 'sector':
+                    sector_col = col
+                elif 'gics sub-industry' in col_lower or 'sub-industry' in col_lower or 'industry' in col_lower:
+                    industry_col = col
             
             # Fallback to positional if column names not found
             if ticker_col is None:
@@ -111,11 +120,23 @@ class SP500Validator:
             if name_col is None:
                 name_col = df.columns[1]
             
+            # Store sectors and industries separately
+            sectors_dict = {}
+            industries_dict = {}
+            
             for _, row in df.iterrows():
                 ticker = str(row[ticker_col]).upper().strip()
                 name = str(row[name_col]).strip()
                 if ticker and name and ticker != 'NAN' and len(ticker) <= 5:
                     sp500_dict[ticker] = name
+                    if sector_col and sector_col in row:
+                        sectors_dict[ticker] = str(row[sector_col]).strip()
+                    if industry_col and industry_col in row:
+                        industries_dict[ticker] = str(row[industry_col]).strip()
+            
+            # Store sectors/industries on the validator instance
+            self.sp500_sectors = sectors_dict
+            self.sp500_industries = industries_dict
             
             # Validate we got reasonable data
             if len(sp500_dict) < 400:
@@ -210,6 +231,20 @@ class SP500Validator:
             return None
         
         return self.sp500_list.get(ticker.upper())
+    
+    def get_sector(self, ticker: str) -> Optional[str]:
+        """Get GICS sector for a valid S&P 500 ticker.
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            GICS sector if ticker is valid, None otherwise
+        """
+        if not self.is_valid_ticker(ticker):
+            return None
+        
+        return self.sp500_sectors.get(ticker.upper())
     
     def find_ticker_by_company_name(self, company_name: str, max_suggestions: int = 3) -> List[Tuple[str, str, float]]:
         """Find tickers by company name using fuzzy matching.
@@ -415,7 +450,11 @@ def get_sp500_company_info(ticker: str) -> str:
     validator = get_validator()
     if validator.is_valid_ticker(ticker):
         name = validator.get_company_name(ticker)
-        return f"{ticker.upper()} is in the S&P 500: {name}"
+        sector = validator.get_sector(ticker)
+        if sector:
+            return f"{ticker.upper()} is in the S&P 500: {name} (Sector: {sector})"
+        else:
+            return f"{ticker.upper()} is in the S&P 500: {name}"
     else:
         return validator.get_validation_message(ticker)
 

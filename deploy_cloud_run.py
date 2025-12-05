@@ -38,7 +38,8 @@ load_dotenv(dotenv_path=env_path, override=True)
 
 # Configuration
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
-LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+# Cloud Run needs a real region (not "global" which is for Gemini)
+CLOUD_RUN_REGION = os.getenv("CLOUD_RUN_REGION", "us-central1")
 SERVICE_NAME = os.getenv("CLOUD_RUN_SERVICE_NAME", "finance-agent")
 AGENT_PATH = project_root / "finance_agent"
 
@@ -67,6 +68,22 @@ if ARIZE_API_KEY and ARIZE_SPACE_ID:
         "ARIZE_ENABLED=true",
     ])
 
+# Add FRED API key if configured
+FRED_API_KEY = os.getenv("FRED_API_KEY")
+if FRED_API_KEY:
+    ENV_VARS.append(f"FRED_API_KEY={FRED_API_KEY}")
+
+# Add Vector Search env vars if configured
+VECTOR_SEARCH_INDEX_ENDPOINT_ID = os.getenv("VECTOR_SEARCH_INDEX_ENDPOINT_ID")
+VECTOR_SEARCH_DEPLOYED_INDEX_ID = os.getenv("VECTOR_SEARCH_DEPLOYED_INDEX_ID")
+VECTOR_SEARCH_LOCATION = os.getenv("VECTOR_SEARCH_LOCATION", "us-central1")
+if VECTOR_SEARCH_INDEX_ENDPOINT_ID:
+    ENV_VARS.extend([
+        f"VECTOR_SEARCH_INDEX_ENDPOINT_ID={VECTOR_SEARCH_INDEX_ENDPOINT_ID}",
+        f"VECTOR_SEARCH_DEPLOYED_INDEX_ID={VECTOR_SEARCH_DEPLOYED_INDEX_ID}",
+        f"VECTOR_SEARCH_LOCATION={VECTOR_SEARCH_LOCATION}",
+    ])
+
 
 def validate_config() -> bool:
     """Validate required configuration."""
@@ -89,7 +106,7 @@ def validate_config() -> bool:
     
     print("\n✅ Configuration:")
     print(f"   Project: {PROJECT_ID}")
-    print(f"   Location: {LOCATION}")
+    print(f"   CLOUD_RUN_REGION: {CLOUD_RUN_REGION}")
     print(f"   Service: {SERVICE_NAME}")
     print(f"   Source: {AGENT_PATH}")
     return True
@@ -100,7 +117,7 @@ def check_service_exists() -> bool:
     try:
         result = subprocess.run(
             ["gcloud", "run", "services", "describe", SERVICE_NAME,
-             f"--region={LOCATION}", f"--project={PROJECT_ID}", "--format=value(name)"],
+             f"--region={CLOUD_RUN_REGION}", f"--project={PROJECT_ID}", "--format=value(name)"],
             capture_output=True, text=True
         )
         return result.returncode == 0
@@ -113,7 +130,7 @@ def get_service_url() -> str | None:
     try:
         result = subprocess.run(
             ["gcloud", "run", "services", "describe", SERVICE_NAME,
-             f"--region={LOCATION}", f"--project={PROJECT_ID}", "--format=value(status.url)"],
+             f"--region={CLOUD_RUN_REGION}", f"--project={PROJECT_ID}", "--format=value(status.url)"],
             capture_output=True, text=True
         )
         return result.stdout.strip() if result.returncode == 0 else None
@@ -141,7 +158,7 @@ def show_instructions():
     print(f"""
 gcloud run deploy {SERVICE_NAME} \\
     --source {AGENT_PATH} \\
-    --region {LOCATION} \\
+    --region {CLOUD_RUN_REGION} \\
     --project {PROJECT_ID} \\
     --allow-unauthenticated \\
     --set-env-vars="{','.join(ENV_VARS)}"
@@ -176,7 +193,7 @@ def deploy():
     cmd = [
         "gcloud", "run", "deploy", SERVICE_NAME,
         f"--source={AGENT_PATH}",
-        f"--region={LOCATION}",
+        f"--region={CLOUD_RUN_REGION}",
         f"--project={PROJECT_ID}",
         "--allow-unauthenticated",
         f"--set-env-vars={','.join(ENV_VARS)}",
@@ -190,7 +207,8 @@ def deploy():
     print("-"*60 + "\n")
     
     try:
-        result = subprocess.run(cmd)
+        # Use shell=True on Windows to find gcloud in PATH
+        result = subprocess.run(cmd, shell=(sys.platform == "win32"))
         
         if result.returncode != 0:
             print("\n❌ Deployment failed!")
@@ -290,7 +308,7 @@ def show_status():
         return
     
     print(f"\n📊 Service: {SERVICE_NAME}")
-    print(f"   Region: {LOCATION}")
+    print(f"   Region: {CLOUD_RUN_REGION}")
     
     url = get_service_url()
     if url:
@@ -303,7 +321,7 @@ def show_status():
     subprocess.run([
         "gcloud", "run", "revisions", "list",
         f"--service={SERVICE_NAME}",
-        f"--region={LOCATION}",
+        f"--region={CLOUD_RUN_REGION}",
         f"--project={PROJECT_ID}",
         "--format=table(name,active.yesno(yes='✓',no=''),createTime.date(),status.conditions[0].type)"
     ])
@@ -317,7 +335,7 @@ def show_logs():
     
     subprocess.run([
         "gcloud", "run", "services", "logs", "read", SERVICE_NAME,
-        f"--region={LOCATION}",
+        f"--region={CLOUD_RUN_REGION}",
         f"--project={PROJECT_ID}",
         "--limit=50"
     ])
@@ -342,7 +360,7 @@ def delete_service():
     
     subprocess.run([
         "gcloud", "run", "services", "delete", SERVICE_NAME,
-        f"--region={LOCATION}",
+        f"--region={CLOUD_RUN_REGION}",
         f"--project={PROJECT_ID}",
         "--quiet"
     ])

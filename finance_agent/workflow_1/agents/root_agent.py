@@ -7,7 +7,7 @@ coordinates specialized sub-agents to handle different types of financial querie
 - economic_agent: Economic indicators via FRED API (GDP, inflation, unemployment, rates)
 - headlines_agent: Recent news and headlines via Google Search
 - portfolio_agent: Portfolio analysis, risk metrics, and rebalancing
-- data_store_agent: Earnings call transcripts via Vertex AI RAG (Q2/Q3 2025)
+- vector_store_agent: Earnings call transcripts via Vertex AI Vector Search (Q2/Q3 2025)
 
 The root agent uses LLM-based delegation to route queries to the appropriate
 sub-agent based on user intent.
@@ -24,14 +24,6 @@ env_path = project_root / '.env'
 load_dotenv(dotenv_path=env_path, override=True)
 
 
-# Import S&P 500 validation tools
-from ..utils.sp500_validator import (
-    find_ticker_by_name,
-    get_sp500_company_info,
-    is_valid_sp500_ticker,
-)
-
-
 # Root agent instruction prompt
 ROOT_AGENT_INSTRUCTION = """You are FinanceBot, an AI assistant specializing in S&P 500 stock market analysis and economic data.
 
@@ -42,25 +34,15 @@ Your role is to coordinate specialized sub-agents to answer user questions about
 - Options data and trading information
 - Economic indicators (GDP, inflation, unemployment, interest rates)
 
-**CRITICAL: S&P 500 Validation**
-You have tools to validate stocks against the official S&P 500 list (from Wikipedia):
-
-1. **find_ticker_by_name**: Use this when users mention company NAMES (e.g., "Hartford", "Apple", "Microsoft")
-   - This finds the correct ticker symbol from company names
-   - Example: "Hartford" → HIG, "Apple" → AAPL
-
-2. **get_sp500_company_info**: Use this to verify a TICKER is in the S&P 500
-   - Example: get_sp500_company_info("HIG") → "HIG is in the S&P 500: Hartford (The)"
-
-3. **is_valid_sp500_ticker**: Quick boolean check if a ticker is valid
-
-**ALWAYS use these tools before delegating to sub-agents:**
-- If user mentions a company name → call find_ticker_by_name first
-- If user provides a ticker → call get_sp500_company_info to verify
-- Only proceed with valid S&P 500 tickers
-
 **Delegation Rules:**
-1. **Stock Prices & Market Data** → Delegate to `market_data_agent`
+
+1. **S&P 500 Validation** → Delegate to `utility_agent`
+   - Convert company names to tickers (e.g., "Hartford" → HIG)
+   - Validate ticker symbols against S&P 500 index
+   - Get company information (sector, industry)
+   - **USE THIS FIRST** when user mentions a company name or unknown ticker
+
+2. **Stock Prices & Market Data** → Delegate to `market_data_agent`
    - Current stock prices, quotes, metrics
    - Historical price data (OHLCV)
    - Options chains and expirations
@@ -68,14 +50,14 @@ You have tools to validate stocks against the official S&P 500 list (from Wikipe
    - Institutional/insider holdings
    - Analyst recommendations and ratings
 
-2. **News & Headlines** → Delegate to `headlines_agent`
+3. **News & Headlines** → Delegate to `headlines_agent`
    - Recent news headlines for companies
    - Breaking market news
    - Earnings announcements and coverage
    - Company press releases
    - Market sentiment from news
 
-3. **Economic Data** → Delegate to `economic_agent`
+4. **Economic Data** → Delegate to `economic_agent`
    - GDP data and economic growth
    - Inflation metrics (CPI, PCE)
    - Unemployment and employment data
@@ -91,7 +73,7 @@ You have tools to validate stocks against the official S&P 500 list (from Wikipe
    - Rebalancing recommendations
    - Diversification analysis
 
-5. **Earnings Call Transcripts & Executive Commentary** → Delegate to `data_store_agent`
+6. **Earnings Call Transcripts & Executive Commentary** → Delegate to `vector_store_agent`
    - What did management say about specific topics
    - CEO/CFO commentary from earnings calls
    - Executive perspectives on challenges, opportunities, strategy
@@ -104,7 +86,7 @@ You have tools to validate stocks against the official S&P 500 list (from Wikipe
    - **USE THIS for "most important challenges", "biggest risks", "key priorities"**
    - **USE THIS when user wants QUALITATIVE insights grounded in executive commentary**
 
-6. **General Questions & Memory** → Handle yourself (DO NOT DELEGATE)
+7. **General Questions & Memory** → Handle yourself (DO NOT DELEGATE)
    - Greetings and farewells
    - Questions about your capabilities
    - Clarification requests
@@ -115,7 +97,7 @@ You have tools to validate stocks against the official S&P 500 list (from Wikipe
      - "Do you remember...?"
 
 **Guidelines:**
-- ALWAYS validate tickers/company names using the validation tools before making requests
+- For company names, delegate to utility_agent first to get the ticker
 - If validation fails, inform the user the stock is not in the S&P 500
 - Be concise but informative in your responses
 - Format financial data clearly (use $ for prices, % for changes)
@@ -123,11 +105,12 @@ You have tools to validate stocks against the official S&P 500 list (from Wikipe
 - For economic questions, explain what indicators mean and their market implications
 
 **Available Sub-Agents:**
+- `utility_agent`: S&P 500 validation (ticker lookup, company name resolution, validation)
 - `market_data_agent`: Real-time stock data via Yahoo Finance (prices, history, financials, options)
 - `headlines_agent`: Recent news and headlines via Google Search (breaking news, earnings, sentiment)
 - `economic_agent`: Economic indicators via FRED API (GDP, inflation, unemployment, interest rates)
 - `portfolio_agent`: Portfolio analysis (value, allocation, risk metrics, performance, rebalancing)
-- `data_store_agent`: Earnings call transcripts from Q2/Q3 2025 via Vertex AI RAG (management commentary, analyst Q&A)
+- `vector_store_agent`: Earnings call transcripts from Q2/Q3 2025 via Vertex AI Vector Search (management commentary, analyst Q&A)
 """
 
 
@@ -166,12 +149,14 @@ def create_root_agent(
         LlmAgent configured as the root orchestrator with sub-agents
     """
     from google.adk.agents import LlmAgent
+    from google.adk.tools.agent_tool import AgentTool
     from ..config import Config
     from .market_data_agent import create_market_data_agent
     from .economic_agent import create_economic_agent
     from .headlines_agent import create_headlines_agent
     from .portfolio_agent import create_portfolio_agent
-    from .data_store_agent import create_data_store_agent
+    from .vector_store_agent import create_vector_store_agent
+    from .utility_agent import create_utility_agent
     
     # Determine models to use
     if model:
@@ -216,20 +201,20 @@ def create_root_agent(
         use_dynamic_routing=use_dynamic_routing,
     )
     
-    data_store_agent = create_data_store_agent(
+    vector_store_agent = create_vector_store_agent(
         model=sub_agent_model,
         use_dynamic_routing=use_dynamic_routing,
     )
     
-    # S&P 500 validation tools for the root agent
-    validation_tools = [
-        find_ticker_by_name,
-        get_sp500_company_info,
-        is_valid_sp500_ticker,
-    ]
+    # Utility agent for S&P 500 validation (isolates custom tools from root)
+    utility_agent = create_utility_agent(
+        model=sub_agent_model,
+        use_dynamic_routing=use_dynamic_routing,
+    )
     
-    # Add memory tool if memory service provided
-    all_tools = list(validation_tools)
+    # Root agent has NO custom tools to allow google_search in headlines_agent
+    # S&P 500 validation is handled by utility_agent
+    all_tools = []
     if memory_service is not None:
         try:
             from google.adk.tools import load_memory
@@ -290,13 +275,23 @@ DO NOT answer memory questions from your own knowledge - ALWAYS call load_memory
         instruction = ROOT_AGENT_INSTRUCTION + memory_instruction
     
     # Create the root orchestrator agent
+    # NOTE: Using AgentTool wrapper instead of sub_agents to support google_search
+    # built-in tool in headlines_agent (ADK limitation: built-in tools don't work with sub_agents)
+    agent_tools = [
+        AgentTool(agent=market_data_agent),
+        AgentTool(agent=headlines_agent),
+        AgentTool(agent=economic_agent),
+        AgentTool(agent=portfolio_agent),
+        AgentTool(agent=vector_store_agent),
+        AgentTool(agent=utility_agent),
+    ]
+    
     root_agent = LlmAgent(
         model=root_model,
         name=app_name,
         description="Main finance assistant that coordinates specialized agents for S&P 500 market analysis and economic data.",
         instruction=instruction,
-        tools=all_tools,
-        sub_agents=[market_data_agent, headlines_agent, economic_agent, portfolio_agent, data_store_agent],
+        tools=all_tools + agent_tools,
         before_model_callback=dynamic_callback,
         after_agent_callback=after_callback,
     )
@@ -311,6 +306,36 @@ DO NOT answer memory questions from your own knowledge - ALWAYS call load_memory
     return root_agent
 
 
+def _get_session_and_memory_services():
+    """Get session and memory services using Postgres.
+    
+    Requires SESSION_DB_URL environment variable to be set.
+    
+    Returns:
+        Tuple of (session_service, memory_service)
+    
+    Raises:
+        ValueError: If SESSION_DB_URL is not set
+    """
+    import os
+    db_url = os.getenv("SESSION_DB_URL")
+    
+    if not db_url:
+        raise ValueError(
+            "SESSION_DB_URL environment variable is required.\n"
+            "Set it to your Postgres connection string, e.g.:\n"
+            "  $env:SESSION_DB_URL = 'postgresql://user:pass@localhost:5432/finance_db'"
+        )
+    
+    from google.adk.sessions import DatabaseSessionService
+    from ..memory import PostgresMemoryService
+    
+    session_service = DatabaseSessionService(db_url=db_url)
+    memory_service = PostgresMemoryService(db_url=db_url)
+    print("📦 Using DatabaseSessionService + PostgresMemoryService (persistent)")
+    return session_service, memory_service
+
+
 async def run_finance_assistant(
     query: str,
     user_id: str = "default_user",
@@ -321,6 +346,10 @@ async def run_finance_assistant(
     
     This is the main entry point for interacting with the finance chatbot.
     It handles session management and streams responses from the agent.
+    
+    Persistence:
+    - If SESSION_DB_URL env var is set: Uses DatabaseSessionService + PostgresMemoryService
+    - Otherwise: Uses InMemorySessionService + InMemoryMemoryService (no persistence)
     
     Args:
         query: User's question or request
@@ -345,28 +374,34 @@ async def run_finance_assistant(
         ```
     """
     from google.adk.runners import Runner
-    from google.adk.sessions import InMemorySessionService
     from google.genai import types
     
-    # Create session service and runner
-    session_service = InMemorySessionService()
+    # Get session and memory services (persistent if DB configured)
+    session_service, memory_service = _get_session_and_memory_services()
     
     # Use consistent app name
     app_name = "finance_assistant"
     
-    # Create the root agent with matching name
-    root_agent = create_root_agent(model=model, app_name=app_name)
-    await session_service.create_session(
-        app_name=app_name,
-        user_id=user_id,
-        session_id=session_id,
-    )
+    # Create the root agent with memory service for recall
+    root_agent = create_root_agent(model=model, app_name=app_name, memory_service=memory_service)
     
-    # Create runner
+    # Create session if it doesn't exist
+    try:
+        await session_service.create_session(
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+    except Exception:
+        # Session might already exist (DatabaseSessionService)
+        pass
+    
+    # Create runner with both services
     runner = Runner(
         agent=root_agent,
         app_name=app_name,
         session_service=session_service,
+        memory_service=memory_service,
     )
     
     # Create user message content
@@ -389,11 +424,14 @@ async def chat_loop(model: Optional[str] = None):
     
     Provides a simple REPL interface to interact with the agent.
     
+    Persistence:
+    - If SESSION_DB_URL env var is set: Uses DatabaseSessionService + PostgresMemoryService
+    - Otherwise: Uses InMemorySessionService + InMemoryMemoryService (no persistence)
+    
     Args:
         model: Optional model override
     """
     from google.adk.runners import Runner
-    from google.adk.sessions import InMemorySessionService
     from google.genai import types
     
     print("\n" + "="*60)
@@ -402,23 +440,32 @@ async def chat_loop(model: Optional[str] = None):
     print("\nType your questions about stocks, prices, news, and more.")
     print("Type 'quit' or 'exit' to end the session.\n")
     
+    # Get session and memory services (persistent if DB configured)
+    session_service, memory_service = _get_session_and_memory_services()
+    
     # Setup with consistent app name
     app_name = "finance_assistant"
-    session_service = InMemorySessionService()
-    root_agent = create_root_agent(model=model, app_name=app_name)
+    root_agent = create_root_agent(model=model, app_name=app_name, memory_service=memory_service)
     user_id = "interactive_user"
     session_id = "interactive_session"
     
-    await session_service.create_session(
-        app_name=app_name,
-        user_id=user_id,
-        session_id=session_id,
-    )
+    # Create session if it doesn't exist
+    try:
+        await session_service.create_session(
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+    except Exception:
+        # Session might already exist (DatabaseSessionService)
+        pass
     
+    # Create runner with both services
     runner = Runner(
         agent=root_agent,
         app_name=app_name,
         session_service=session_service,
+        memory_service=memory_service,
     )
     
     print(f"✓ Agent: {root_agent.name}")

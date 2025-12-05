@@ -99,7 +99,9 @@ def create_headlines_agent(model: Optional[str] = None, use_dynamic_routing: boo
             complex_model=Config.MODEL_COMPLEX,
         )
     
-    # Create the sub-agent with Google Search
+    # Create the sub-agent WITH Google Search
+    # This works because the root agent no longer has custom tools
+    # (S&P 500 validation moved to utility_agent)
     headlines_agent = LlmAgent(
         model=agent_model,
         name="headlines_agent",

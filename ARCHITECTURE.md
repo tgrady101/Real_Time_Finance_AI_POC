@@ -22,11 +22,11 @@ A production-ready S&P 500 financial chatbot built on Google's Agent Development
 This system is an S&P 500-focused financial intelligence chatbot that leverages:
 
 - **Google ADK (Agent Development Kit)**: Framework for building AI agents with LLM-based orchestration
-- **Multi-Agent Architecture**: Root agent orchestrates specialized sub-agents (market_data_agent, economic_agent, headlines_agent, portfolio_agent, data_store_agent)
+- **Multi-Agent Architecture**: Root agent orchestrates specialized sub-agents (market_data_agent, economic_agent, headlines_agent, portfolio_agent, vector_store_agent)
 - **Dynamic Model Routing**: `before_model_callback` selects optimal model per-request
 - **MCP (Model Context Protocol)**: Yahoo Finance integration via stdio-based MCP server
 - **Persistent Memory**: PostgreSQL-backed cross-session recall with `load_memory` tool
-- **Arize AX Observability**: OpenTelemetry tracing + comprehensive evaluation suite with 25 evaluators (96.2% pass rate)
+- **Arize AX Observability**: OpenTelemetry tracing + comprehensive evaluation suite with 15 evaluators (9 L1 automated + 6 L3 LLM-as-Judge)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -90,7 +90,7 @@ This system is an S&P 500-focused financial intelligence chatbot that leverages:
 | **Memory** | PostgreSQL + `load_memory` tool | Cross-session recall |
 | **Sessions** | InMemorySessionService | Ephemeral per-request sessions |
 | **Observability** | Arize AX + OpenTelemetry | Tracing, model routing analytics |
-| **Evaluations** | Custom + LLM-as-a-Judge | 25 evaluators (47 tests, 96.2% pass rate) |
+| **Evaluations** | Custom + LLM-as-a-Judge | 15 evaluators (55 tests, 95%+ pass rate) |
 | **Deployment** | Google Cloud Run | Serverless container hosting |
 | **Infrastructure** | Terraform | Cloud SQL provisioning |
 
@@ -153,6 +153,7 @@ This system is an S&P 500-focused financial intelligence chatbot that leverages:
 │  │  │  │  │  • get_inflation_data                            │  │  │   │  │
 │  │  │  │  │  • get_unemployment_data                         │  │  │   │  │
 │  │  │  │  │  • get_interest_rate_data                        │  │  │   │  │
+│  │  │  │  │  • get_cpi_trend, get_indicator_trend            │  │  │   │  │
 │  │  │  │  └──────────────────────────────────────────────────┘  │  │   │  │
 │  │  │  └────────────────────────────────────────────────────────┘  │   │  │
 │  │  └──────────────────────────────────────────────────────────────┘   │  │
@@ -244,17 +245,18 @@ economic_agent = LlmAgent(
 | **Tools** | Python functions, MCPToolset | External capabilities |
 | **before_model_callback** | `dynamic_model_selector()` | Intercept/modify LLM requests |
 | **after_agent_callback** | `auto_save_to_memory()` | Post-turn actions |
-| **sub_agents** | `[market_data_agent, economic_agent]` | Hierarchical delegation |
+| **sub_agents** | `[market_data_agent, economic_agent, headlines_agent, portfolio_agent, vector_store_agent, utility_agent]` | Hierarchical delegation |
 
 ### Sub-Agents
 
 | Agent | Status | Data Source | Capabilities |
 |-------|--------|-------------|--------------|
 | **market_data_agent** | ✅ Built | Yahoo Finance MCP | Stock prices, news, financials, options |
-| **economic_agent** | ✅ Built | FRED API | GDP, inflation, unemployment, interest rates |
+| **economic_agent** | ✅ Built | FRED API | GDP, inflation, unemployment, interest rates, historical trends |
 | **headlines_agent** | ✅ Built | Google Search | Recent news, headlines, earnings coverage, sentiment |
 | **portfolio_agent** | ✅ Built | yfinance + numpy | Portfolio value, allocation, risk metrics, rebalancing |
-| **data_store_agent** | ✅ Built | Vertex AI RAG | Q2/Q3 2025 earnings call transcripts with citations |
+| **vector_store_agent** | ✅ Built | Vertex AI Vector Search | Q2/Q3 2025 earnings call transcripts with hybrid search |
+| **utility_agent** | ✅ Built | Local S&P 500 list | Ticker validation, company name lookup, fuzzy matching |
 
 #### Economic Agent (Built)
 
@@ -271,17 +273,20 @@ economic_agent = LlmAgent(
     - Inflation metrics (CPI)
     - Unemployment rates
     - Federal Reserve interest rates
+    - Historical trends with date range support
     """,
     tools=[
         get_gdp_data,           # GDP growth data
         get_inflation_data,     # CPI inflation data
         get_unemployment_data,  # Unemployment rate
         get_interest_rate_data, # Fed funds rate
+        get_cpi_trend,          # CPI trend analysis for a specific year
+        get_indicator_trend,    # Generic indicator trend with date ranges
     ],
 )
 ```
 
-**API Client**: `workflow_1/api_clients/fred_api.py`
+**API Client**: `workflow_1/api_clients/fred_api.py` (supports `observation_start`/`observation_end` date parameters)
 
 #### Headlines Agent (Built)
 
@@ -338,54 +343,89 @@ portfolio_agent = LlmAgent(
 **Data Source**: yfinance for prices, numpy for calculations
 ```
 
-#### Data Store Agent (Built)
+#### Vector Store Agent (Built)
 
 ```python
-# workflow_1/agents/data_store_agent.py
+# workflow_1/agents/vector_store_agent.py
 
-data_store_agent = LlmAgent(
+vector_store_agent = LlmAgent(
     model="gemini-3-pro-preview",  # Complex document analysis
-    name="data_store_agent",
+    name="vector_store_agent",
     instruction="""Search and analyze earnings call transcripts from Q2/Q3 2025.
     
     Capabilities:
-    - Query earnings call transcripts via Vertex AI Discovery Engine
+    - Hybrid search: dense semantic (gemini-embedding-001) + BM25 sparse lexical
+    - RRF fusion (α=0.5) for optimal ranking
+    - 70,846 chunks from 503 S&P 500 companies
     - Extract key insights from management commentary
     - Cite specific sources in responses
-    - Answer questions about company guidance and strategy
     """,
     tools=[
-        search_earnings_calls,  # Vertex AI Data Store search with citations
+        search_earnings_calls,  # Vertex AI Vector Search with HybridQuery
     ],
 )
 ```
 
-**Data Source**: Vertex AI Discovery Engine (auto-generates embeddings during indexing)
+**Data Source**: Vertex AI Vector Search with HybridQuery API
+- **Dense Embeddings**: gemini-embedding-001 (3072 dimensions)
+- **Sparse Embeddings**: BM25 (44,446 vocabulary, avg 123.8 tokens/doc)
+- **Fusion**: Reciprocal Rank Fusion with `rrf_ranking_alpha=0.5`
+- **Index**: BATCH_UPDATE method, ANN for both dense and sparse
+
+#### Utility Agent (Built)
+
+```python
+# workflow_1/agents/utility_agent.py
+
+utility_agent = LlmAgent(
+    model="gemini-2.5-flash",
+    name="utility_agent",
+    instruction="""S&P 500 stock validation and ticker lookup.
+    
+    Capabilities:
+    - Convert company names to ticker symbols
+    - Verify if a ticker is in the S&P 500
+    - Get company details from S&P 500 list
+    """,
+    tools=[
+        find_ticker_by_name,      # "Apple" → "AAPL"
+        get_sp500_company_info,   # Ticker → company details
+        is_valid_sp500_ticker,    # Quick S&P 500 validation
+    ],
+)
+```
+
+**Data Source**: Local S&P 500 company list with fuzzy matching for name lookups
 
 #### Agent Hierarchy Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                     Root Agent (finance_assistant)                       │
-│  Tools: find_ticker_by_name, get_sp500_company_info, load_memory        │
+│  Tools: load_memory (cross-session recall)                              │
 │                                                                          │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
 │  │ market_data     │  │ headlines_agent │  │ economic_agent          │  │
 │  │ _agent ✅       │  │ ✅ Google Search│  │ ✅ FRED API             │  │
 │  │                 │  │                 │  │                         │  │
 │  │ Yahoo Finance   │  │ Recent news     │  │ Interest rates          │  │
-│  │ MCP Toolset     │  │ Headlines       │  │ Inflation               │  │
-│  │                 │  │ Earnings        │  │ GDP, Employment         │  │
+│  │ MCP Toolset     │  │ Headlines       │  │ Inflation, GDP          │  │
+│  │                 │  │ Earnings        │  │ Historical trends       │  │
 │  └─────────────────┘  └─────────────────┘  └─────────────────────────┘  │
 │                                                                          │
 │  ┌─────────────────┐  ┌─────────────────────────────────────────────┐   │
-│  │ portfolio_agent │  │ data_store_agent                            │   │
-│  │ ✅ yfinance     │  │ ✅ Vertex AI RAG                            │   │
+│  │ portfolio_agent │  │ vector_store_agent                          │   │
+│  │ ✅ yfinance     │  │ ✅ Vertex AI Vector Search (Hybrid)         │   │
 │  │                 │  │                                             │   │
-│  │ Risk metrics    │  │ Q2/Q3 2025 earnings calls                   │   │
-│  │ Allocation      │  │ Earnings call transcripts                   │   │
-│  │ Rebalancing     │  │ Management commentary                       │   │
+│  │ Risk metrics    │  │ 70,846 chunks (503 companies)               │   │
+│  │ Allocation      │  │ Dense: gemini-embedding-001 (3072-dim)      │   │
+│  │ Rebalancing     │  │ Sparse: BM25 (44,446 vocab)                 │   │
 │  └─────────────────┘  └─────────────────────────────────────────────┘   │
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │ utility_agent ✅ S&P 500 validation                             │    │
+│  │ • find_ticker_by_name • get_sp500_company_info • is_valid_ticker│    │
+│  └─────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -963,7 +1003,7 @@ Real_Time_Finance_AI_POC/
         │   ├── economic_agent.py     # FRED API sub-agent
         │   ├── headlines_agent.py    # Google Search sub-agent
         │   ├── portfolio_agent.py    # Portfolio analysis sub-agent
-        │   └── data_store_agent.py   # Vertex AI RAG sub-agent
+        │   └── vector_store_agent.py # Vertex AI Vector Search sub-agent
 │       ├── api_clients/
 │       │   └── fred_api.py           # FRED economic data client
 │       ├── mcp_clients/

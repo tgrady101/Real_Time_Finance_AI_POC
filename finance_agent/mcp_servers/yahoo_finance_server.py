@@ -40,7 +40,7 @@ yfinance_server = FastMCP(
 This server is used to get information about a given ticker symbol from yahoo finance.
 
 Available tools:
-- get_historical_stock_prices: Get historical stock prices for a given ticker symbol from yahoo finance. Include the following information: Date, Open, High, Low, Close, Volume, Adj Close.
+- get_historical_stock_prices: Get historical stock prices for a given ticker symbol from yahoo finance. Supports both period-based queries (1y, 2y, 5y, ytd, max) AND specific date ranges using start/end parameters (YYYY-MM-DD format). Include the following information: Date, Open, High, Low, Close, Volume, Adj Close.
 - get_stock_info: Get stock information for a given ticker symbol from yahoo finance. Include the following information: Stock Price & Trading Info, Company Information, Financial Metrics, Earnings & Revenue, Margins & Returns, Dividends, Balance Sheet, Ownership, Analyst Coverage, Risk Metrics, Other.
 - get_yahoo_finance_news: Get news for a given ticker symbol from yahoo finance.
 - get_stock_actions: Get stock dividends and stock splits for a given ticker symbol from yahoo finance.
@@ -61,16 +61,28 @@ Args:
         The ticker symbol of the stock to get historical prices for, e.g. "AAPL"
     period : str
         Valid periods: 1d,5d,1mo,3mo,6mo,1y,2y,5y,10y,ytd,max
-        Either Use period parameter or use start and end
+        Use period parameter OR use start and end dates (not both)
         Default is "1mo"
     interval : str
         Valid intervals: 1m,2m,5m,15m,30m,60m,90m,1h,1d,5d,1wk,1mo,3mo
         Intraday data cannot extend last 60 days
         Default is "1d"
+    start : str
+        Start date for historical data in YYYY-MM-DD format, e.g. "2024-01-01"
+        Use with end parameter instead of period for specific date ranges
+        Optional - if provided, period is ignored
+    end : str
+        End date for historical data in YYYY-MM-DD format, e.g. "2024-12-31"
+        Use with start parameter instead of period for specific date ranges
+        Optional - if provided, period is ignored
 """,
 )
 async def get_historical_stock_prices(
-    ticker: str, period: str = "1mo", interval: str = "1d"
+    ticker: str, 
+    period: str = "1mo", 
+    interval: str = "1d",
+    start: str = None,
+    end: str = None
 ) -> str:
     """Get historical stock prices for a given ticker symbol
 
@@ -79,12 +91,16 @@ async def get_historical_stock_prices(
             The ticker symbol of the stock to get historical prices for, e.g. "AAPL"
         period : str
             Valid periods: 1d,5d,1mo,3mo,6mo,1y,2y,5y,10y,ytd,max
-            Either Use period parameter or use start and end
+            Use period parameter OR use start and end dates (not both)
             Default is "1mo"
         interval : str
             Valid intervals: 1m,2m,5m,15m,30m,60m,90m,1h,1d,5d,1wk,1mo,3mo
             Intraday data cannot extend last 60 days
             Default is "1d"
+        start : str
+            Start date in YYYY-MM-DD format (optional, use instead of period)
+        end : str
+            End date in YYYY-MM-DD format (optional, use instead of period)
     """
     company = yf.Ticker(ticker)
     try:
@@ -95,8 +111,16 @@ async def get_historical_stock_prices(
         print(f"Error: getting historical stock prices for {ticker}: {e}")
         return f"Error: getting historical stock prices for {ticker}: {e}"
 
-    # If the company is found, get the historical data
-    hist_data = company.history(period=period, interval=interval)
+    # If start/end dates provided, use them instead of period
+    if start and end:
+        hist_data = company.history(start=start, end=end, interval=interval)
+    elif start:
+        # If only start provided, get data from start to now
+        hist_data = company.history(start=start, interval=interval)
+    else:
+        # Use period-based query
+        hist_data = company.history(period=period, interval=interval)
+    
     hist_data = hist_data.reset_index(names="Date")
     hist_data = hist_data.to_json(orient="records", date_format="iso")
     return hist_data

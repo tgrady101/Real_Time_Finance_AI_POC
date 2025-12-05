@@ -41,6 +41,9 @@ chunked_reports/
 chunked_earnings_calls/
 *.html
 test_output.txt
+checkpoints/
+embeddings_cache/
+hybrid_embeddings/
 
 # OS
 .DS_Store

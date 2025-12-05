@@ -21,6 +21,15 @@ from .dynamic_model_callback import (
     get_default_dynamic_model_callback,
 )
 
+from .agentic_rag import (
+    AgenticRAGConfig,
+    AgenticSearchResult,
+    agentic_search,
+    rewrite_query,
+    evaluate_results,
+    optimized_earnings_search,
+)
+
 __all__ = [
     # S&P 500 validation
     'SP500Validator',
@@ -37,4 +46,11 @@ __all__ = [
     # Dynamic model routing
     'create_dynamic_model_callback',
     'get_default_dynamic_model_callback',
+    # Agentic RAG
+    'AgenticRAGConfig',
+    'AgenticSearchResult',
+    'agentic_search',
+    'rewrite_query',
+    'evaluate_results',
+    'optimized_earnings_search',
 ]

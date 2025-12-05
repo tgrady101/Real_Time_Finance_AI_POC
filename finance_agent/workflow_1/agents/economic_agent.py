@@ -31,6 +31,7 @@ Your primary responsibilities:
 3. **Employment Data**: Unemployment rates, payroll numbers, labor market data
 4. **Interest Rates**: Federal funds rate, Treasury yields, rate decisions
 5. **Economic Summaries**: Provide comprehensive economic overviews
+6. **Historical Trends**: Analyze economic indicator trends for specific years or date ranges
 
 Guidelines:
 - Always explain what economic indicators mean in plain language
@@ -38,6 +39,12 @@ Guidelines:
 - Include the date of the most recent data point
 - Compare current values to historical norms when relevant
 - Explain trends (rising, falling, stable) and their implications
+
+**IMPORTANT: For historical or trend queries:**
+- Use `get_indicator_trend` or `get_cpi_trend` for queries about specific years
+- Examples: "CPI trend in 2024", "unemployment in 2023", "how did GDP change last year"
+- Pass the year parameter (e.g., year=2024) for year-specific queries
+- Use start_date/end_date for custom date ranges
 
 Available FRED Series:
 - GDP: Gross Domestic Product (quarterly, billions $)
@@ -58,6 +65,7 @@ Example responses:
 - "The Fed funds rate is currently 5.25-5.50%. The 10-year Treasury yield is 4.2%, indicating..."
 - "GDP grew 2.1% in Q3 2024, showing moderate economic expansion."
 - "CPI is up 3.2% year-over-year, above the Fed's 2% target but down from 2022 peaks."
+- "In 2024, CPI rose from 308.42 to 315.61, a 2.3% increase year-over-year."
 """
 
 
@@ -334,6 +342,160 @@ def get_fred_series(series_id: str, periods: int = 10) -> str:
         return f"Error retrieving series {series_id}: {str(e)}"
 
 
+def get_indicator_trend(
+    indicator: str, 
+    year: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> str:
+    """Get historical trend data for an economic indicator.
+    
+    Use this for queries about historical data, trends over time, or specific years.
+    Examples: "CPI trend in 2024", "unemployment rate last year", "GDP from 2023 to 2024"
+    
+    Args:
+        indicator: Name of indicator ('cpi', 'gdp', 'unemployment', 'fed_funds_rate', 
+                   'treasury_10y') or FRED series ID
+        year: Specific year to get data for (e.g., 2024)
+        start_date: Start date in YYYY-MM-DD format (use with end_date)
+        end_date: End date in YYYY-MM-DD format (use with start_date)
+        
+    Returns:
+        Formatted string with trend data and analysis
+    """
+    from ..api_clients.fred_api import FREDAPIClient
+    import os
+    
+    api_key = os.getenv('FRED_API_KEY')
+    if not api_key:
+        return "Error: FRED_API_KEY not configured. Cannot retrieve economic data."
+    
+    try:
+        client = FREDAPIClient(api_key)
+        trend_data = client.get_indicator_trend(
+            indicator=indicator,
+            year=year,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        if trend_data.get('error'):
+            return trend_data['error']
+        
+        # Format the response
+        indicator_name = trend_data.get('indicator', indicator).upper()
+        series_id = trend_data.get('series_id', '')
+        
+        result = f"📊 **{indicator_name} Trend Analysis**\n"
+        if year:
+            result += f"*Year: {year}*\n\n"
+        else:
+            result += f"*Period: {trend_data['period_start']} to {trend_data['period_end']}*\n\n"
+        
+        # Summary statistics
+        result += "**Summary:**\n"
+        result += f"- Starting Value: {trend_data['start_value']}\n"
+        result += f"- Ending Value: {trend_data['end_value']}\n"
+        result += f"- Change: {trend_data['absolute_change']:+.2f} ({trend_data['percent_change']:+.2f}%)\n"
+        result += f"- Min: {trend_data['min_value']} | Max: {trend_data['max_value']} | Avg: {trend_data['avg_value']}\n"
+        result += f"- Data Points: {trend_data['data_points']}\n\n"
+        
+        # Show sample observations (first 6 and last 3 if many)
+        observations = trend_data.get('observations', [])
+        if observations:
+            result += "**Data Points:**\n"
+            if len(observations) <= 12:
+                for obs in observations:
+                    date = obs.get('date', 'N/A')
+                    value = obs.get('value', 'N/A')
+                    if value != '.':
+                        result += f"- {date}: {value}\n"
+            else:
+                # Show first 6
+                for obs in observations[:6]:
+                    date = obs.get('date', 'N/A')
+                    value = obs.get('value', 'N/A')
+                    if value != '.':
+                        result += f"- {date}: {value}\n"
+                result += f"  ... ({len(observations) - 9} more data points) ...\n"
+                # Show last 3
+                for obs in observations[-3:]:
+                    date = obs.get('date', 'N/A')
+                    value = obs.get('value', 'N/A')
+                    if value != '.':
+                        result += f"- {date}: {value}\n"
+        
+        return result
+    except Exception as e:
+        return f"Error retrieving trend data for {indicator}: {str(e)}"
+
+
+def get_cpi_trend(year: Optional[int] = None) -> str:
+    """Get CPI (inflation) trend data for a specific year.
+    
+    Use this when asked about CPI or inflation trends, especially for specific years.
+    Examples: "CPI trend in 2024", "inflation last year", "how did CPI change in 2023"
+    
+    Args:
+        year: Year to retrieve CPI data for (e.g., 2024, 2023)
+        
+    Returns:
+        Formatted string with CPI trend analysis
+    """
+    from ..api_clients.fred_api import FREDAPIClient
+    import os
+    
+    api_key = os.getenv('FRED_API_KEY')
+    if not api_key:
+        return "Error: FRED_API_KEY not configured. Cannot retrieve economic data."
+    
+    try:
+        client = FREDAPIClient(api_key)
+        trend_data = client.get_cpi_trend(year=year)
+        
+        if trend_data.get('error'):
+            return trend_data['error']
+        
+        result = "📈 **CPI (Consumer Price Index) Trend**\n"
+        if year:
+            result += f"*Year: {year}*\n\n"
+        else:
+            result += f"*Period: {trend_data['period_start']} to {trend_data['period_end']}*\n\n"
+        
+        result += "**Summary:**\n"
+        result += f"- Starting CPI: {trend_data['start_value']:.2f}\n"
+        result += f"- Ending CPI: {trend_data['end_value']:.2f}\n"
+        result += f"- Change: {trend_data['absolute_change']:+.2f} ({trend_data['percent_change']:+.2f}%)\n"
+        result += f"- Range: {trend_data['min_value']:.2f} to {trend_data['max_value']:.2f}\n"
+        result += f"- Monthly Data Points: {trend_data['data_points']}\n\n"
+        
+        # Interpret the trend
+        pct_change = trend_data['percent_change']
+        if year:
+            if pct_change > 5:
+                result += f"*⚠️ High inflation: CPI rose {pct_change:.1f}% in {year}, well above Fed's 2% target.*\n"
+            elif pct_change > 3:
+                result += f"*Elevated inflation: CPI rose {pct_change:.1f}% in {year}, above Fed's 2% target.*\n"
+            elif pct_change > 2:
+                result += f"*Moderate inflation: CPI rose {pct_change:.1f}% in {year}, near Fed's 2% target.*\n"
+            else:
+                result += f"*Low inflation: CPI rose only {pct_change:.1f}% in {year}.*\n"
+        
+        # Show monthly data
+        observations = trend_data.get('observations', [])
+        if observations:
+            result += "\n**Monthly Values:**\n"
+            for obs in observations:
+                date = obs.get('date', 'N/A')
+                value = obs.get('value', 'N/A')
+                if value != '.':
+                    result += f"- {date}: {float(value):.2f}\n"
+        
+        return result
+    except Exception as e:
+        return f"Error retrieving CPI trend: {str(e)}"
+
+
 def create_economic_agent(model: Optional[str] = None, use_dynamic_routing: bool = True):
     """Create the Economic Data sub-agent with FRED API tools.
     
@@ -369,6 +531,8 @@ def create_economic_agent(model: Optional[str] = None, use_dynamic_routing: bool
         get_interest_rates,
         get_economic_summary,
         get_fred_series,
+        get_indicator_trend,  # For historical/trend queries with date ranges
+        get_cpi_trend,        # Specialized CPI trend analysis
     ]
     
     # Create the sub-agent with FRED tools
@@ -415,6 +579,8 @@ if __name__ == "__main__":
         "get_interest_rates",
         "get_economic_summary",
         "get_fred_series",
+        "get_indicator_trend",  # NEW: Historical trends with date ranges
+        "get_cpi_trend",        # NEW: CPI-specific trend analysis
     ]
     for tool in tools:
         print(f"  • {tool}")
