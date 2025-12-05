@@ -81,7 +81,7 @@ def export_to_jsonl(chunks: List[Dict], output_path: Path) -> str:
                         "value_int": int(year)
                     })
                 except (ValueError, TypeError):
-                    pass
+                    pass  # Skip numeric restrict if year cannot be converted to int
             
             doc = {
                 "id": chunk['id'],

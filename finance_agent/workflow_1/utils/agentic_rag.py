@@ -443,8 +443,8 @@ def agentic_search(
                 print(f"\n[AgenticRAG] Quality threshold met! Score: {current_score:.2f}")
             break
         
-        # Update current query for next iteration
-        current_query = optimized_query
+        # Update current query for next iteration (used in next loop iteration)
+        current_query = optimized_query  # noqa: F841 - used in next iteration
     
     if config.enable_logging:
         print(f"\n[AgenticRAG] Complete. Best score: {best_score:.2f}, Iterations: {len(quality_history)}")

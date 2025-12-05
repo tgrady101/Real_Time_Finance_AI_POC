@@ -384,7 +384,6 @@ def get_indicator_trend(
         
         # Format the response
         indicator_name = trend_data.get('indicator', indicator).upper()
-        series_id = trend_data.get('series_id', '')
         
         result = f"📊 **{indicator_name} Trend Analysis**\n"
         if year:

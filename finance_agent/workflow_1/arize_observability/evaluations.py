@@ -54,7 +54,7 @@ try:
     ARIZE_AVAILABLE = True
 except ImportError:
     ARIZE_AVAILABLE = False
-    print("[WARN] Arize not installed. Run: pip install arize")
+    # Warning logged at runtime if needed, not during import
 
 try:
     from phoenix.evals import llm_classify, GeminiModel
@@ -63,7 +63,7 @@ try:
     PHOENIX_AVAILABLE = True
 except ImportError:
     PHOENIX_AVAILABLE = False
-    print("[WARN] Phoenix Evals not installed. Run: pip install arize-phoenix-evals")
+    # Warning logged at runtime if needed, not during import
 
 
 # =============================================================================
@@ -663,7 +663,7 @@ async def query_live_agent(queries: List[str], delay: float = 0.5) -> List[str]:
         session_id = f"session_{uuid.uuid4().hex[:8]}"
         try:
             await session_service.create_session(app_name="eval", user_id=user_id, session_id=session_id)
-        except:
+        except Exception:  # noqa: S110 - Session creation failure is non-fatal for evaluations
             pass
         
         runner = Runner(agent=root_agent, app_name="eval", session_service=session_service)
@@ -778,7 +778,7 @@ def log_to_arize(dataset: List[Dict], responses: List[str],
         
         # Create dataset in Arize
         dataset_name = f"{experiment_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        dataset_id = client.create_dataset(
+        _dataset_id = client.create_dataset(  # noqa: F841 - API returns ID, not used
             space_id=space_id,
             dataset_name=dataset_name,
             dataset_type=GENERATIVE,

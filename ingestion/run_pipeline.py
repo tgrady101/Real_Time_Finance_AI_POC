@@ -238,7 +238,7 @@ def main():
         processed_ids, _ = checkpoint_mgr.load_state()
         
         embedding_gen = EmbeddingGenerator(config, checkpoint_mgr)
-        processed_ids = embedding_gen.generate(chunks, processed_ids)
+        _processed_ids = embedding_gen.generate(chunks, processed_ids)  # noqa: F841
     
     # Load embeddings from cache
     embedding_gen = EmbeddingGenerator(config, checkpoint_mgr)
