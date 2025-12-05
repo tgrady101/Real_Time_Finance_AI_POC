@@ -434,6 +434,7 @@ def get_portfolio_performance(holdings: str, period: str = "1y") -> str:
     Returns:
         Performance comparison with SPY and QQQ benchmarks
     """
+    import pandas as pd
     import yfinance as yf
     from ..utils.sp500_validator import is_valid_sp500_ticker
     
