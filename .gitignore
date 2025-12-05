@@ -27,8 +27,7 @@ ENV/
 
 # Terraform
 terraform/.terraform/
-terraform/*.tfstate
-terraform/*.tfstate.backup
+terraform/*.tfstate*
 terraform/*.tfvars
 !terraform/*.tfvars.example
 terraform/.terraform.lock.hcl
@@ -41,6 +40,9 @@ chunked_reports/
 chunked_earnings_calls/
 *.html
 test_output.txt
+checkpoints/
+embeddings_cache/
+hybrid_embeddings/
 
 # OS
 .DS_Store

@@ -4,7 +4,7 @@ S&P 500-focused AI chatbot with multi-agent architecture for comprehensive finan
 
 ## Features
 
-- **Multi-Agent Architecture**: Root Orchestrator with 5 specialized sub-agents (Market Data, Economic, Headlines, Portfolio, Data Store)
+- **Multi-Agent Architecture**: Root Orchestrator with 6 specialized sub-agents (Market Data, Economic, Headlines, Portfolio, Vector Store, Utility)
 - **Dynamic Model Routing**: Automatic selection between gemini-2.5-flash (simple) and gemini-3-pro-preview (complex)
 - **Real-Time Data**: Yahoo Finance MCP Server for stock prices and fundamentals
 - **Economic Data**: FRED API integration for GDP, inflation, unemployment, interest rates
@@ -12,8 +12,10 @@ S&P 500-focused AI chatbot with multi-agent architecture for comprehensive finan
 - **Portfolio Analysis**: Risk metrics, allocation breakdown, rebalancing recommendations
 - **S&P 500 Scope**: 500 companies with ticker validation and fuzzy matching
 - **Persistent Memory**: PostgreSQL-backed cross-session recall with `load_memory` tool
-- **Earnings Call RAG**: Vertex AI Data Store for Q2/Q3 2025 S&P 500 earnings transcripts with citations
-- **Observability**: Arize AX for LLM tracing + 25-evaluator test suite 
+- **Hybrid Vector Search**: Vertex AI Vector Search with 3072-dim dense embeddings (gemini-embedding-001) + BM25 sparse embeddings, RRF fusion (α=0.5)
+- **Earnings Call RAG**: 70,846 chunks from 503 S&P 500 companies (Q2/Q3 2025 transcripts) with citations
+- **Crash-Resistant Ingestion**: Modular pipeline with per-chunk checkpointing, atomic writes, parallel I/O
+- **Observability**: Arize AX for LLM tracing + 15-evaluator test suite (9 L1 automated + 6 L3 LLM-as-Judge) 
 
 ## Quick Start
 
@@ -64,15 +66,16 @@ python main.py
 ```
 Root Orchestrator (dynamic model routing)
 ├── Market Data Agent (Yahoo Finance MCP) - Stock prices, financials, options
-├── Economic Agent (FRED API) - GDP, inflation, unemployment, rates
+├── Economic Agent (FRED API) - GDP, inflation, unemployment, rates, historical trends
 ├── Headlines Agent (Google Search) - News, earnings, sentiment
 ├── Portfolio Agent (yfinance + numpy) - Risk, allocation, rebalancing
-├── Data Store Agent (Vertex AI RAG) - Earnings call transcripts with citations
-├── S&P 500 Validation Tools
+├── Vector Store Agent (Vertex AI Vector Search) - Hybrid dense+sparse search with RRF
+│   └── 70,846 earnings call chunks (503 companies, Q2/Q3 2025)
+├── Utility Agent - S&P 500 ticker validation, company lookup
 └── Memory Tools (load_memory for cross-session recall)
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for comprehensive architecture documentation.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for comprehensive architecture documentation.
 
 ## Example Queries
 
@@ -94,10 +97,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for comprehensive architecture 
 - "Analyze my portfolio: 100 AAPL, 50 MSFT, 200 GOOGL"
 - "What's the risk profile of my holdings?"
 
-**Earnings Call RAG:**
+**Earnings Call RAG (Hybrid Search):**
 - "What did Apple's CEO say about AI in the Q3 2025 earnings call?"
-- "What are Microsoft's revenue growth projections?"
 - "Summarize Tesla's Q2 2025 earnings highlights"
+- "Which companies mentioned supply chain challenges?"
+- "Compare guidance from NVDA and AMD earnings calls"
 
 **Memory Recall:**
 - "What questions have I asked in the past?"
@@ -111,15 +115,26 @@ Real_Time_Finance_AI_POC/
 │   ├── Dockerfile          # Cloud Run container
 │   ├── mcp_servers/        # Bundled Yahoo Finance MCP
 │   └── workflow_1/
-│       ├── agents/         # Root + Market Data agents
-│       ├── api_clients/    # FRED API client
+│       ├── agents/         # Root + 6 specialized sub-agents
+│       ├── api_clients/    # FRED API client (with date range support)
 │       ├── mcp_clients/    # Yahoo Finance MCP client
 │       ├── memory/         # PostgresMemoryService
-│       ├── arize_observability/
-│       └── utils/          # S&P 500 validation, model routing
-├── terraform/              # Cloud SQL, IAM, storage
-├── docs/                   # Architecture documentation
-└── tests/                  # Test suite
+│       ├── arize_observability/  # 15 evaluators (9 L1 + 6 L3)
+│       └── utils/          # S&P 500 validation, model routing, RAG
+├── ingestion/              # Hybrid vector search ingestion pipeline
+│   ├── run_pipeline.py     # Main orchestrator (6 stages)
+│   ├── pipeline/           # Modular components
+│   │   ├── config.py       # Pipeline configuration
+│   │   ├── checkpoint.py   # Crash-resistant checkpointing
+│   │   ├── embeddings.py   # Dense embeddings (gemini-embedding-001)
+│   │   ├── bm25.py         # Sparse BM25 encoder
+│   │   ├── chunker.py      # Text chunking
+│   │   └── export.py       # JSONL export + GCS upload
+│   ├── embeddings_cache/   # Per-chunk embedding storage
+│   └── downloaded_earnings_calls/  # 979 transcript files
+├── terraform/              # Cloud SQL, Vector Search, GCS
+├── ARCHITECTURE.md         # Comprehensive architecture documentation
+└── pyproject.toml          # Python project configuration
 ```
 
 ## Deployment
@@ -132,6 +147,3 @@ python deploy_cloud_run.py --deploy
 python deploy_cloud_run.py --logs
 ```
 
-## License
-
-MIT

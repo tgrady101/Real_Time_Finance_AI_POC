@@ -48,11 +48,9 @@ for env_path in env_paths:
 # Import agent components
 try:
     from workflow_1.agents.root_agent import create_root_agent
-    from workflow_1.config import Config
     from workflow_1.arize_observability.observability import setup_arize_tracing
 except ImportError:
     from src.workflow_1.agents.root_agent import create_root_agent
-    from src.workflow_1.config import Config
     from src.workflow_1.arize_observability.observability import setup_arize_tracing
 
 # Initialize Arize tracing BEFORE creating agents (for auto-instrumentation)

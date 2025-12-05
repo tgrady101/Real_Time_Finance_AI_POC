@@ -72,7 +72,9 @@ class FREDAPIClient:
         self, 
         series_id: str, 
         limit: int = 10,
-        sort_order: str = 'desc'
+        sort_order: str = 'desc',
+        observation_start: Optional[str] = None,
+        observation_end: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get observations for a FRED series.
         
@@ -80,6 +82,8 @@ class FREDAPIClient:
             series_id: FRED series ID
             limit: Number of most recent observations to return
             sort_order: 'asc' or 'desc'
+            observation_start: Start date in YYYY-MM-DD format (optional)
+            observation_end: End date in YYYY-MM-DD format (optional)
             
         Returns:
             List of observations with date and value
@@ -89,6 +93,12 @@ class FREDAPIClient:
             'limit': limit,
             'sort_order': sort_order
         }
+        
+        # Add date range filters if specified
+        if observation_start:
+            params['observation_start'] = observation_start
+        if observation_end:
+            params['observation_end'] = observation_end
         
         data = self._make_request('series/observations', params)
         return data.get('observations', [])
@@ -206,6 +216,175 @@ class FREDAPIClient:
             'unemployment_rate': self.get_latest_unemployment(),
             'interest_rates': self.get_interest_rates(),
             'as_of_date': datetime.now().strftime('%Y-%m-%d')
+        }
+    
+    def get_series_for_year(
+        self, 
+        series_id: str, 
+        year: int,
+        sort_order: str = 'asc'
+    ) -> List[Dict[str, Any]]:
+        """Get all observations for a series within a specific year.
+        
+        Args:
+            series_id: FRED series ID
+            year: Year to retrieve data for (e.g., 2024)
+            sort_order: 'asc' for chronological, 'desc' for reverse
+            
+        Returns:
+            List of observations for that year
+        """
+        start_date = f"{year}-01-01"
+        end_date = f"{year}-12-31"
+        
+        # Use a high limit to get all observations for the year
+        return self.get_series_observations(
+            series_id=series_id,
+            limit=366,  # Max observations for daily data
+            sort_order=sort_order,
+            observation_start=start_date,
+            observation_end=end_date
+        )
+    
+    def get_series_for_date_range(
+        self, 
+        series_id: str, 
+        start_date: str,
+        end_date: str,
+        sort_order: str = 'asc'
+    ) -> List[Dict[str, Any]]:
+        """Get all observations for a series within a date range.
+        
+        Args:
+            series_id: FRED series ID
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            sort_order: 'asc' for chronological, 'desc' for reverse
+            
+        Returns:
+            List of observations for the date range
+        """
+        return self.get_series_observations(
+            series_id=series_id,
+            limit=1000,  # High limit for long date ranges
+            sort_order=sort_order,
+            observation_start=start_date,
+            observation_end=end_date
+        )
+    
+    @instrument(name="fred_get_cpi_trend")
+    def get_cpi_trend(
+        self, 
+        year: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get CPI trend data for a specific year or date range.
+        
+        Args:
+            year: Year to get CPI data for (e.g., 2024)
+            start_date: Start date in YYYY-MM-DD format (alternative to year)
+            end_date: End date in YYYY-MM-DD format (alternative to year)
+            
+        Returns:
+            Dict with CPI observations and trend analysis
+        """
+        if year:
+            observations = self.get_series_for_year(self.SERIES['cpi'], year)
+        elif start_date and end_date:
+            observations = self.get_series_for_date_range(
+                self.SERIES['cpi'], start_date, end_date
+            )
+        else:
+            # Default to last 12 months
+            observations = self.get_inflation_rate(periods=12)
+        
+        if not observations:
+            return {'error': 'No CPI data available for the specified period'}
+        
+        # Calculate statistics
+        values = [float(obs['value']) for obs in observations if obs.get('value') != '.']
+        if not values:
+            return {'error': 'No valid CPI data points'}
+        
+        first_value = values[0]
+        last_value = values[-1]
+        change = last_value - first_value
+        pct_change = (change / first_value) * 100 if first_value else 0
+        
+        return {
+            'observations': observations,
+            'period_start': observations[0]['date'] if observations else None,
+            'period_end': observations[-1]['date'] if observations else None,
+            'start_value': first_value,
+            'end_value': last_value,
+            'absolute_change': round(change, 2),
+            'percent_change': round(pct_change, 2),
+            'data_points': len(values),
+            'min_value': round(min(values), 2),
+            'max_value': round(max(values), 2)
+        }
+    
+    @instrument(name="fred_get_indicator_trend")
+    def get_indicator_trend(
+        self,
+        indicator: str,
+        year: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get trend data for any economic indicator.
+        
+        Args:
+            indicator: Indicator name ('gdp', 'cpi', 'unemployment', 'fed_funds_rate', 'treasury_10y')
+            year: Year to get data for (e.g., 2024)
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            
+        Returns:
+            Dict with observations and trend analysis
+        """
+        # Map common names to series IDs
+        series_id = self.SERIES.get(indicator.lower())
+        if not series_id:
+            # Try using the indicator directly as a series ID
+            series_id = indicator.upper()
+        
+        if year:
+            observations = self.get_series_for_year(series_id, year)
+        elif start_date and end_date:
+            observations = self.get_series_for_date_range(
+                series_id, start_date, end_date
+            )
+        else:
+            observations = self.get_series_observations(series_id, limit=12)
+        
+        if not observations:
+            return {'error': f'No data available for {indicator}'}
+        
+        values = [float(obs['value']) for obs in observations if obs.get('value') != '.']
+        if not values:
+            return {'error': f'No valid data points for {indicator}'}
+        
+        first_value = values[0]
+        last_value = values[-1]
+        change = last_value - first_value
+        pct_change = (change / first_value) * 100 if first_value else 0
+        
+        return {
+            'indicator': indicator,
+            'series_id': series_id,
+            'observations': observations,
+            'period_start': observations[0]['date'] if observations else None,
+            'period_end': observations[-1]['date'] if observations else None,
+            'start_value': first_value,
+            'end_value': last_value,
+            'absolute_change': round(change, 2),
+            'percent_change': round(pct_change, 2),
+            'data_points': len(values),
+            'min_value': round(min(values), 2),
+            'max_value': round(max(values), 2),
+            'avg_value': round(sum(values) / len(values), 2)
         }
 
 

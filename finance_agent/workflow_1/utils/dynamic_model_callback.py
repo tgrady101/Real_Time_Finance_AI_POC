@@ -74,9 +74,9 @@ def create_dynamic_model_callback(fast_model: str, complex_model: str):
         
         # Log the routing decision
         agent_name = callback_context.agent_name
-        print(f"🔀 [{agent_name}] Dynamic routing: {selected_model} ({confidence:.0%})")
+        print(f"[ROUTE] [{agent_name}] Dynamic routing: {selected_model} ({confidence:.0%})")
         print(f"   Query: {user_query[:60]}...")
-        print(f"   Reason: {reason[:50]}")
+        print(f"   Reason: {reason[:50]}...")
         
         # Store routing info in state for observability
         callback_context.state["model_routing"] = {

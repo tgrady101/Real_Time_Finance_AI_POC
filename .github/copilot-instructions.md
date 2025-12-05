@@ -18,17 +18,18 @@ python main.py
 # Deploy to Cloud Run
 python deploy_cloud_run.py --deploy
 
-# Run evaluations (25 evaluators, 96.2% pass rate)
+# Run evaluations (15 evaluators: 9 L1 automated + 6 L3 LLM-as-Judge)
 python -m finance_agent.workflow_1.arize_observability.evaluations
 ```
 
 ### Key Directories
 - `finance_agent/main.py` - FastAPI server entry point
-- `finance_agent/workflow_1/agents/` - All agent definitions (root, market_data, economic, headlines, portfolio, data_store)
+- `finance_agent/workflow_1/agents/` - All agent definitions (root, market_data, economic, headlines, portfolio, vector_store, utility)
 - `finance_agent/workflow_1/utils/` - Utilities (sp500_validator, query_classifier, dynamic_model_callback)
 - `finance_agent/workflow_1/memory/` - PostgresMemoryService for cross-session recall
-- `ingestion/` - Data ingestion scripts (sp500_earnings_ingestion.py)
-- `terraform/` - Cloud SQL + Vertex AI Data Store infrastructure
+- `ingestion/run_pipeline.py` - Modular ingestion pipeline orchestrator
+- `ingestion/pipeline/` - Pipeline modules (bm25, embeddings, export, chunker, etc.)
+- `terraform/` - Cloud SQL + Vertex AI Vector Search infrastructure
 
 ## Architecture Patterns
 
@@ -57,12 +58,13 @@ def create_my_agent(use_dynamic_routing: bool = True):
 ```
 
 ### Multi-Agent Delegation
-Root agent delegates to 5 specialized sub-agents via `sub_agents` parameter:
-- `market_data_agent` → Yahoo Finance MCP (stock prices, financials, options)
-- `economic_agent` → FRED API (GDP, inflation, unemployment, rates)
+Root agent delegates to 6 specialized sub-agents via `sub_agents` parameter:
+- `market_data_agent` → Yahoo Finance MCP (stock prices, financials, options, historical data with date ranges)
+- `economic_agent` → FRED API (GDP, inflation, unemployment, rates, historical trends with date ranges)
 - `headlines_agent` → Google Search built-in tool (news, headlines)
 - `portfolio_agent` → yfinance + numpy (risk metrics, rebalancing)
-- `data_store_agent` → Vertex AI Discovery Engine RAG (Q2/Q3 2025 earnings call transcripts with citations)
+- `vector_store_agent` → Vertex AI Vector Search (Q2/Q3 2025 earnings call transcripts with hybrid dense+BM25 search)
+- `utility_agent` → S&P 500 validation (ticker lookup, company name resolution)
 
 ### MCP Tool Integration
 Yahoo Finance uses Model Context Protocol via stdio:
@@ -82,22 +84,28 @@ from workflow_1.utils.sp500_validator import (
 ```
 
 ### Earnings Call Ingestion
-Ingest S&P 500 earnings call transcripts to Vertex AI Data Store (Discovery Engine auto-generates embeddings):
+Ingest S&P 500 earnings call transcripts to Vertex AI Vector Search with hybrid embeddings:
 ```powershell
 # Set API key (API Ninjas Developer plan: $39/month)
-$env:API_NINJAS_KEY = "your-api-key"
+$env:NINJA_API_KEY = "your-api-key"
 
-# Run ingestion for Q2/Q3 2025 (default)
+# Full pipeline (download + embed + upload)
 cd ingestion
-python sp500_earnings_ingestion.py
+python run_pipeline.py
 
-# Custom quarters/year
-python sp500_earnings_ingestion.py --year 2025 --quarters 2,3
+# Resume from checkpoint if embedding failed
+python run_pipeline.py --resume
+
+# Skip download (use cached transcripts)
+python run_pipeline.py --skip-download
+
+# Generate and upload chunk content only (skip embeddings)
+python run_pipeline.py --skip-download --chunks-only
 
 # Test with limited companies
-python sp500_earnings_ingestion.py --limit 10 --skip-import
+python run_pipeline.py --limit 10
 ```
-The ingestion script downloads transcripts, chunks them, and imports to Vertex AI where embeddings are automatically generated during indexing.
+The ingestion pipeline downloads transcripts, generates 3072-dim dense embeddings (gemini-embedding-001) + BM25 sparse embeddings, and uploads to GCS for Vector Search indexing.
 
 ## Memory System
 
@@ -138,8 +146,10 @@ MODEL_COMPLEX=gemini-3-pro-preview
 MEMORY_STORAGE=auto
 SESSION_DB_URL=postgresql://...  # Required for postgres mode
 
-# Data Store (earnings call RAG)
-DATA_STORE_ID=earnings-call-datastore
+# Vector Search (earnings call RAG)
+VECTOR_SEARCH_LOCATION=us-central1
+VECTOR_SEARCH_INDEX_ENDPOINT_ID=...  # From terraform output
+VECTOR_SEARCH_DEPLOYED_INDEX_ID=earnings_hybrid_3072
 
 # API Keys
 API_NINJAS_KEY=...  # For earnings call ingestion ($39/month)
@@ -155,12 +165,14 @@ ARIZE_ENABLED=true
 - **Imports:** Use relative imports within `workflow_1/` package
 - **Config:** Always use `Config` class from `workflow_1/config.py`, never hardcode values
 - **Callbacks:** Use `before_model_callback` for routing, `after_agent_callback` for side effects
+- **NO FALLBACKS:** Never implement silent fallbacks. If a required service (Vector Search, BM25, embeddings, etc.) is unavailable or fails, raise an exception with a clear error message. This ensures issues are surfaced immediately for investigation rather than being masked by degraded functionality.
 
 ## Testing & Evaluation
-Evaluations in `arize_observability/evaluations.py` - 25 evaluators across 47 test cases (96.2% pass rate) covering:
+Evaluations in `arize_observability/evaluations.py` - 15 evaluators (9 L1 automated + 6 L3 LLM-as-Judge) across 55 test queries covering:
 - Market data (ticker validation, price format, tool usage)
-- Economic data format
+- Economic data format (historical trends, date ranges)
 - Headlines (news detection, source citation)
 - Portfolio (risk metrics, allocation, rebalancing)
-- Data store (RAG grounding, citation inclusion, earnings accuracy)
+- Vector store (RAG grounding, citation inclusion, earnings accuracy)
+- Utility (S&P 500 validation, ticker lookup)
 - Model routing and agent delegation accuracy

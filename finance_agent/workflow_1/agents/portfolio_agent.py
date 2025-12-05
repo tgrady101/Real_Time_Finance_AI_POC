@@ -268,6 +268,7 @@ def calculate_portfolio_risk(holdings: str, period: str = "1y") -> str:
         Detailed risk analysis including volatility, Sharpe ratio, max drawdown
     """
     import numpy as np
+    import pandas as pd
     import yfinance as yf
     from ..utils.sp500_validator import is_valid_sp500_ticker
     
@@ -283,8 +284,16 @@ def calculate_portfolio_risk(holdings: str, period: str = "1y") -> str:
         return "❌ No valid S&P 500 tickers found in holdings."
     
     try:
-        # Download historical data
-        data = yf.download(valid_tickers, period=period, progress=False)['Adj Close']
+        # Download historical data (yfinance now uses auto_adjust=True by default)
+        raw_data = yf.download(valid_tickers, period=period, progress=False, auto_adjust=True)
+        
+        # Handle MultiIndex columns from yfinance (e.g., ('Close', 'AAPL'))
+        if isinstance(raw_data.columns, pd.MultiIndex):
+            data = raw_data['Close']
+        elif 'Close' in raw_data.columns:
+            data = raw_data['Close']
+        else:
+            data = raw_data
         
         if data.empty:
             return "❌ Could not retrieve historical data."
@@ -293,12 +302,31 @@ def calculate_portfolio_risk(holdings: str, period: str = "1y") -> str:
         if len(valid_tickers) == 1:
             data = data.to_frame(name=valid_tickers[0])
         
+        # Drop any tickers with missing data
+        data = data.dropna(axis=1, how='all')
+        if data.empty:
+            return "❌ Could not retrieve valid historical data for the given tickers."
+        
+        # Update valid_tickers to only include those with data
+        valid_tickers = [t for t in valid_tickers if t in data.columns]
+        if not valid_tickers:
+            return "❌ No valid price data available for the given tickers."
+        
         # Calculate daily returns
         returns = data.pct_change().dropna()
         
-        # Calculate portfolio weights
+        # Calculate portfolio weights - handle NaN/empty prices safely
         prices = data.iloc[-1]
-        total_value = sum(parsed_holdings.get(t, 0) * prices.get(t, 0) for t in valid_tickers)
+        total_value = 0.0
+        for t in valid_tickers:
+            price = prices.get(t, 0)
+            if pd.isna(price) or price == '':
+                price = 0
+            shares = parsed_holdings.get(t, 0)
+            total_value += float(shares) * float(price)
+        
+        if total_value == 0:
+            return "❌ Could not calculate portfolio value. Price data may be unavailable."
         weights = np.array([
             (parsed_holdings.get(t, 0) * prices.get(t, 0)) / total_value 
             for t in valid_tickers
@@ -323,7 +351,13 @@ def calculate_portfolio_risk(holdings: str, period: str = "1y") -> str:
         var_95 = np.percentile(portfolio_returns, 5) * 100
         
         # Get SPY for comparison
-        spy_data = yf.download('SPY', period=period, progress=False)['Adj Close']
+        spy_raw = yf.download('SPY', period=period, progress=False, auto_adjust=True)
+        if isinstance(spy_raw.columns, pd.MultiIndex):
+            spy_data = spy_raw['Close']['SPY']
+        elif 'Close' in spy_raw.columns:
+            spy_data = spy_raw['Close']
+        else:
+            spy_data = spy_raw.iloc[:, 0]  # Take first column
         spy_returns = spy_data.pct_change().dropna()
         spy_annual = spy_returns.mean() * 252
         spy_vol = spy_returns.std() * np.sqrt(252)
@@ -400,7 +434,7 @@ def get_portfolio_performance(holdings: str, period: str = "1y") -> str:
     Returns:
         Performance comparison with SPY and QQQ benchmarks
     """
-    import numpy as np
+    import pandas as pd
     import yfinance as yf
     from ..utils.sp500_validator import is_valid_sp500_ticker
     
@@ -417,7 +451,15 @@ def get_portfolio_performance(holdings: str, period: str = "1y") -> str:
     try:
         # Get all data including benchmarks
         all_tickers = valid_tickers + ['SPY', 'QQQ']
-        data = yf.download(all_tickers, period=period, progress=False)['Adj Close']
+        raw_data = yf.download(all_tickers, period=period, progress=False, auto_adjust=True)
+        
+        # Handle MultiIndex columns from yfinance
+        if isinstance(raw_data.columns, pd.MultiIndex):
+            data = raw_data['Close']
+        elif 'Close' in raw_data.columns:
+            data = raw_data['Close']
+        else:
+            data = raw_data
         
         if data.empty:
             return "❌ Could not retrieve historical data."
@@ -594,12 +636,13 @@ def _parse_holdings(holdings_str: str) -> Dict[str, float]:
     - "AAPL: 100, MSFT: 50"
     - "100 shares of Apple"
     - "$10000 in AAPL" (converts to approximate shares)
+    - "AAPL, MSFT, GOOGL" (defaults to 1 share each for analysis)
     
     Returns:
         Dictionary of {ticker: shares}
     """
     import re
-    from ..utils.sp500_validator import find_ticker_by_name, is_valid_sp500_ticker
+    from ..utils.sp500_validator import is_valid_sp500_ticker
     
     holdings = {}
     holdings_str = holdings_str.upper()
@@ -625,7 +668,11 @@ def _parse_holdings(holdings_str: str) -> Dict[str, float]:
     
     if not holdings:  # Only try if first pattern didn't work
         for match in re.finditer(pattern2, holdings_str):
-            amount = float(match.group(1).replace(',', ''))
+            amount_str = match.group(1).replace(',', '')
+            # Skip if amount is empty (can happen with malformed input)
+            if not amount_str:
+                continue
+            amount = float(amount_str)
             ticker = match.group(2)
             
             if is_valid_sp500_ticker(ticker):
@@ -634,10 +681,23 @@ def _parse_holdings(holdings_str: str) -> Dict[str, float]:
                     import yfinance as yf
                     stock = yf.Ticker(ticker)
                     price = stock.info.get('currentPrice') or stock.info.get('regularMarketPrice', 100)
-                    shares = amount / price
-                    holdings[ticker] = holdings.get(ticker, 0) + shares
+                    if price and price > 0:
+                        shares = amount / price
+                        holdings[ticker] = holdings.get(ticker, 0) + shares
                 except Exception:
                     pass  # Skip tickers that fail to fetch
+    
+    # Pattern 3: Ticker-only list "AAPL, MSFT, GOOGL" or "AAPL MSFT GOOGL"
+    # Default to 1 share each for risk analysis purposes
+    if not holdings:
+        ticker_pattern = r'\b([A-Z]{1,5})\b'
+        for match in re.finditer(ticker_pattern, holdings_str):
+            ticker = match.group(1)
+            # Filter out common non-ticker words
+            if ticker in ['FOR', 'AND', 'THE', 'WITH', 'RISK', 'ANALYSIS', 'PORTFOLIO', 'METRICS']:
+                continue
+            if is_valid_sp500_ticker(ticker):
+                holdings[ticker] = 1.0  # Default to 1 share for analysis
     
     return holdings
 

@@ -26,7 +26,19 @@ class Config:
     GOOGLE_CLOUD_PROJECT: str = os.getenv('GOOGLE_CLOUD_PROJECT', '')
     # Note: gemini-3-pro-preview only supports 'global' region
     GOOGLE_CLOUD_LOCATION: str = os.getenv('GOOGLE_CLOUD_LOCATION', 'global')
-    DATA_STORE_ID: str = os.getenv('DATA_STORE_ID', 'earnings-call-datastore')
+    
+    # Vertex AI Vector Search Configuration
+    VECTOR_SEARCH_LOCATION: str = os.getenv('VECTOR_SEARCH_LOCATION', 'us-central1')
+    VECTOR_SEARCH_INDEX_ENDPOINT_ID: str = os.getenv('VECTOR_SEARCH_INDEX_ENDPOINT_ID', '')
+    VECTOR_SEARCH_DEPLOYED_INDEX_ID: str = os.getenv('VECTOR_SEARCH_DEPLOYED_INDEX_ID', 'earnings_hybrid_3072')
+    
+    # Embedding Configuration (for manual embeddings)
+    EMBEDDING_MODEL: str = os.getenv('EMBEDDING_MODEL', 'gemini-embedding-001')
+    EMBEDDING_LOCATION: str = os.getenv('EMBEDDING_LOCATION', 'us-central1')  # Embeddings work best here
+    # 3072 is the ONLY dimension that is pre-normalized by Vertex AI
+    # Lower dimensions (768, 1536) require manual L2 normalization for accurate similarity
+    EMBEDDING_DIMENSIONALITY: int = int(os.getenv('EMBEDDING_DIMENSIONALITY', '3072'))
+    VECTOR_STORE_PATH: str = os.getenv('VECTOR_STORE_PATH', 'data/earnings_vectors.json')
     
     # Model Configuration
     # Default model for general use
@@ -41,7 +53,8 @@ class Config:
     MODEL_FAST: str = os.getenv('MODEL_FAST', 'gemini-2.5-flash')
     
     # Agent Parameters
-    AGENT_TEMPERATURE: float = float(os.getenv('AGENT_TEMPERATURE', '0.7'))
+    # Temperature fixed at 1.0 - do not change (optimal for Gemini models)
+    AGENT_TEMPERATURE: float = 1.0
     AGENT_MAX_TOKENS: int = int(os.getenv('AGENT_MAX_TOKENS', '2048'))
     
     # Rate Limiting
@@ -98,7 +111,8 @@ API Keys:
 Google Cloud:
   Project: {cls.GOOGLE_CLOUD_PROJECT}
   Location: {cls.GOOGLE_CLOUD_LOCATION}
-  Data Store: {cls.DATA_STORE_ID}
+  Vector Search Location: {cls.VECTOR_SEARCH_LOCATION}
+  Vector Search Endpoint: {cls.VECTOR_SEARCH_INDEX_ENDPOINT_ID or '[NOT SET]'}
 
 Models:
   Default: {cls.GEMINI_MODEL}
