@@ -341,7 +341,6 @@ def _generate_query_embedding(query: str, config: Dict[str, str]) -> List[float]
 def _generate_sparse_embedding(query: str, bm25_data: Dict) -> Dict[str, List]:
     """Generate BM25 sparse embedding for a query."""
     import re
-    import math
     
     if not bm25_data:
         return {"values": [], "dimensions": []}

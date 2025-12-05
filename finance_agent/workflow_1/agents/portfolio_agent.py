@@ -434,7 +434,6 @@ def get_portfolio_performance(holdings: str, period: str = "1y") -> str:
     Returns:
         Performance comparison with SPY and QQQ benchmarks
     """
-    import numpy as np
     import yfinance as yf
     from ..utils.sp500_validator import is_valid_sp500_ticker
     
@@ -642,7 +641,7 @@ def _parse_holdings(holdings_str: str) -> Dict[str, float]:
         Dictionary of {ticker: shares}
     """
     import re
-    from ..utils.sp500_validator import find_ticker_by_name, is_valid_sp500_ticker
+    from ..utils.sp500_validator import is_valid_sp500_ticker
     
     holdings = {}
     holdings_str = holdings_str.upper()

@@ -26,8 +26,6 @@ class SP500Validator:
         Returns:
             DataFrame or None: The S&P 500 constituents table if found
         """
-        import pandas as pd
-        
         candidates = []
         
         for i, table in enumerate(tables):
