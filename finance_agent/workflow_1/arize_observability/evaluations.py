@@ -26,7 +26,7 @@ import asyncio
 import random
 import warnings
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from pathlib import Path
 from datetime import datetime
 
@@ -49,7 +49,6 @@ load_dotenv(dotenv_path=project_root / '.env', override=True)
 
 try:
     from arize.experimental.datasets import ArizeDatasetsClient
-    from arize.experimental.datasets.experiments.types import EvaluationResult
     from arize.experimental.datasets.utils.constants import GENERATIVE
     ARIZE_AVAILABLE = True
 except ImportError:

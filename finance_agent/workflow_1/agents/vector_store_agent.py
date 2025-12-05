@@ -286,7 +286,7 @@ def _load_bm25_encoder():
             return data
         raise ValueError(
             "BM25 encoder not found in GCS. "
-            "Run: python hybrid_vector_search_ingestion.py --skip-download"
+            "Run: python run_pipeline.py --skip-download --chunks-only"
         )
     
     # Local development path
@@ -299,7 +299,7 @@ def _load_bm25_encoder():
             return data
         raise ValueError(
             f"BM25 encoder not found at {bm25_path} or in GCS. "
-            "Run: python hybrid_vector_search_ingestion.py --skip-download"
+            "Run: python run_pipeline.py --skip-download --chunks-only"
         )
     
     try:
@@ -385,41 +385,6 @@ def _generate_sparse_embedding(query: str, bm25_data: Dict) -> Dict[str, List]:
         dimensions, values = zip(*sorted_pairs)
     
     return {"values": list(values), "dimensions": list(dimensions)}
-
-
-def _load_chunk_metadata() -> Dict[str, Dict]:
-    """Load chunk metadata from the most recent embeddings file."""
-    hybrid_dir = Path(__file__).parent.parent.parent.parent / "ingestion" / "hybrid_embeddings"
-    
-    if not hybrid_dir.exists():
-        return {}
-    
-    # Find most recent JSONL file
-    jsonl_files = list(hybrid_dir.glob("hybrid_embeddings_*.jsonl"))
-    if not jsonl_files:
-        return {}
-    
-    latest_file = max(jsonl_files, key=lambda p: p.stat().st_mtime)
-    
-    metadata = {}
-    try:
-        with open(latest_file, 'r') as f:
-            for line in f:
-                doc = json.loads(line.strip())
-                doc_id = doc.get('id', '')
-                # Extract metadata from restricts
-                restricts = doc.get('restricts', [])
-                meta = {}
-                for r in restricts:
-                    namespace = r.get('namespace', '')
-                    allow_list = r.get('allow_list', [])
-                    if allow_list:
-                        meta[namespace] = allow_list[0]
-                metadata[doc_id] = meta
-    except Exception as e:
-        print(f"Warning: Could not load chunk metadata: {e}")
-    
-    return metadata
 
 
 def _load_chunk_content() -> Dict[str, str]:

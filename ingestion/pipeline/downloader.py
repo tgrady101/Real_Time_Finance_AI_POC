@@ -1,7 +1,6 @@
 """Transcript downloading from API Ninjas."""
 
 import time
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import requests
