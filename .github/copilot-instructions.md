@@ -151,12 +151,30 @@ VECTOR_SEARCH_LOCATION=us-central1
 VECTOR_SEARCH_INDEX_ENDPOINT_ID=...  # From terraform output
 VECTOR_SEARCH_DEPLOYED_INDEX_ID=earnings_hybrid_3072
 
+# Reranking (Vertex AI Ranking API)
+RERANK_ENABLED=true           # Enable/disable reranking
+RERANK_K1=25                  # Initial retrieval count before reranking
+RERANK_MODEL=semantic-ranker-default-004  # Ranking API model
+
 # API Keys
 API_NINJAS_KEY=...  # For earnings call ingestion ($39/month)
 ARIZE_API_KEY=...
 ARIZE_SPACE_ID=...
 ARIZE_ENABLED=true
 ```
+
+## Reranking (Two-Stage Retrieval)
+
+The vector store agent uses Vertex AI Ranking API for improved search quality:
+1. **Stage 1 (Retrieval):** Fetch K1=25 candidates using hybrid search (dense + BM25)
+2. **Stage 2 (Reranking):** Rerank using `semantic-ranker-default-004` to return top K2=max_results
+
+Configuration in `vector_store_agent.py`:
+- `RERANK_K1=25` - Initial retrieval count
+- `RERANK_ENABLED=true` - Enable/disable reranking
+- `RERANK_MODEL=semantic-ranker-default-004` - Best quality (1024 token limit)
+
+Disable reranking via `RERANK_ENABLED=false` to skip the ranking API call.
 
 ## Code Conventions
 - **Line length:** 100 characters

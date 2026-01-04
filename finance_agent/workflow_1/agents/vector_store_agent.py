@@ -29,6 +29,114 @@ load_dotenv(dotenv_path=env_path, override=True)
 # Direct REST API for Vector Search (bypasses SDK v1beta1 $alt bug)
 # =============================================================================
 
+# Reranking configuration (uses Config class values via os.getenv for module-level constants)
+RERANK_K1 = int(os.getenv("RERANK_K1", "25"))  # Initial retrieval count (candidates for reranking)
+RERANK_MODEL = os.getenv("RERANK_MODEL", "semantic-ranker-default-004")  # Vertex AI Ranking API model
+RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").lower() == "true"
+
+
+def _rerank_results(
+    query: str,
+    results: List[Dict],
+    top_n: int,
+    chunk_content: Dict[str, str],
+    project_id: str,
+    location: str = "global",
+) -> List[Dict]:
+    """Rerank search results using Vertex AI Ranking API.
+    
+    Uses the Discovery Engine semantic-ranker-default-004 model to rerank
+    results based on semantic relevance to the query.
+    
+    Args:
+        query: The search query
+        results: List of search results with 'id' and 'distance' keys
+        top_n: Number of top results to return after reranking
+        chunk_content: Dict mapping chunk IDs to their content/metadata
+        project_id: GCP project ID
+        location: API location (default: 'global')
+        
+    Returns:
+        List of reranked results (same format as input, but reordered and truncated)
+    """
+    if not results:
+        return results
+    
+    import google.auth
+    import google.auth.transport.requests
+    
+    # Get credentials and access token
+    credentials, _ = google.auth.default()
+    auth_req = google.auth.transport.requests.Request()
+    credentials.refresh(auth_req)
+    access_token = credentials.token
+    
+    # Build the Ranking API URL
+    url = (
+        f"https://discoveryengine.googleapis.com/v1/projects/{project_id}/"
+        f"locations/{location}/rankingConfigs/default_ranking_config:rank"
+    )
+    
+    # Build ranking records from results
+    records = []
+    for result in results:
+        doc_id = result['id']
+        if doc_id in chunk_content:
+            chunk = chunk_content[doc_id]
+            # Build record with id, title, and content
+            record = {
+                "id": doc_id,
+                "title": f"{chunk.get('ticker', 'Unknown')} {chunk.get('quarter', '')} - {chunk.get('speaker', '')}",
+                "content": chunk.get('content', '')[:1000]  # Limit to ~1024 tokens
+            }
+            records.append(record)
+    
+    if not records:
+        return results[:top_n]  # Fall back to original order if no content
+    
+    # Build request body
+    request_body = {
+        "model": f"projects/{project_id}/locations/{location}/rankingConfigs/{RERANK_MODEL}",
+        "topN": top_n,
+        "query": query,
+        "records": records
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        response = requests.post(url, json=request_body, headers=headers)
+        
+        if response.status_code != 200:
+            print(f"Warning: Ranking API error {response.status_code}: {response.text[:200]}")
+            # Fall back to original order on error
+            return results[:top_n]
+        
+        result_data = response.json()
+        
+        # Build a map of original results by ID for fast lookup
+        original_by_id = {r['id']: r for r in results}
+        
+        # Return results in reranked order
+        reranked = []
+        for ranked_record in result_data.get("records", []):
+            doc_id = ranked_record.get("id")
+            if doc_id and doc_id in original_by_id:
+                # Preserve original result format but add rerank score
+                reranked_result = original_by_id[doc_id].copy()
+                reranked_result['rerank_score'] = ranked_record.get("score", 0.0)
+                reranked.append(reranked_result)
+        
+        return reranked
+        
+    except Exception as e:
+        print(f"Warning: Ranking API call failed: {e}")
+        return results[:top_n]  # Fall back to original order
+
+
 def _find_neighbors_rest(
     public_endpoint_domain: str,
     project_id: str,
@@ -546,6 +654,10 @@ def search_earnings_calls(
         if not public_endpoint_domain:
             raise ValueError("Index endpoint does not have a public endpoint domain configured")
         
+        # Determine initial retrieval count (K1)
+        # If reranking is enabled, get more candidates; otherwise just enough to filter
+        initial_k = RERANK_K1 if RERANK_ENABLED else max_results * 2
+        
         # Execute search via direct REST API (bypasses SDK v1beta1 $alt bug)
         neighbors = _find_neighbors_rest(
             public_endpoint_domain=public_endpoint_domain,
@@ -555,7 +667,7 @@ def search_earnings_calls(
             deployed_index_id=config['deployed_index_id'],
             dense_embedding=dense_embedding,
             sparse_embedding=sparse_embedding,
-            num_neighbors=max_results * 2,  # Get more to filter
+            num_neighbors=initial_k,
             restricts=restricts if restricts else None,
             numeric_restricts=numeric_restricts if numeric_restricts else None,
             per_crowding_attribute_neighbor_count=3 if not filtering_single_company else None,
@@ -563,6 +675,17 @@ def search_earnings_calls(
         
         # Load chunk content for retrieved IDs
         chunk_content = _load_chunk_content()
+        
+        # Apply reranking if enabled (Vertex AI Ranking API)
+        if RERANK_ENABLED and len(neighbors) > max_results:
+            neighbors = _rerank_results(
+                query=query,
+                results=neighbors,
+                top_n=max_results,
+                chunk_content=chunk_content,
+                project_id=config['project_id'],
+                location="global",  # Ranking API uses global endpoint
+            )
         
         # Format results
         formatted_results = []
