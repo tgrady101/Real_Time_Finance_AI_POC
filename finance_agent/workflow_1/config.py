@@ -32,6 +32,12 @@ class Config:
     VECTOR_SEARCH_INDEX_ENDPOINT_ID: str = os.getenv('VECTOR_SEARCH_INDEX_ENDPOINT_ID', '')
     VECTOR_SEARCH_DEPLOYED_INDEX_ID: str = os.getenv('VECTOR_SEARCH_DEPLOYED_INDEX_ID', 'earnings_hybrid_3072')
     
+    # Reranking Configuration (Vertex AI Ranking API)
+    # Uses Discovery Engine semantic-ranker-default-004 model
+    RERANK_ENABLED: bool = os.getenv('RERANK_ENABLED', 'true').lower() == 'true'
+    RERANK_K1: int = int(os.getenv('RERANK_K1', '25'))  # Initial retrieval (before reranking)
+    RERANK_MODEL: str = os.getenv('RERANK_MODEL', 'semantic-ranker-default-004')
+    
     # Embedding Configuration (for manual embeddings)
     EMBEDDING_MODEL: str = os.getenv('EMBEDDING_MODEL', 'gemini-embedding-001')
     EMBEDDING_LOCATION: str = os.getenv('EMBEDDING_LOCATION', 'us-central1')  # Embeddings work best here
@@ -113,6 +119,11 @@ Google Cloud:
   Location: {cls.GOOGLE_CLOUD_LOCATION}
   Vector Search Location: {cls.VECTOR_SEARCH_LOCATION}
   Vector Search Endpoint: {cls.VECTOR_SEARCH_INDEX_ENDPOINT_ID or '[NOT SET]'}
+
+Reranking:
+  Enabled: {cls.RERANK_ENABLED}
+  K1 (initial retrieval): {cls.RERANK_K1}
+  Model: {cls.RERANK_MODEL}
 
 Models:
   Default: {cls.GEMINI_MODEL}
